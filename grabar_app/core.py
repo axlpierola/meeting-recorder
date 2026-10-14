@@ -526,10 +526,10 @@ class Recorder:
             raise RuntimeError("No hay ni audio del sistema ni micrófono para grabar")
         import pyaudiowpatch as pa  # type: ignore
 
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         clean = re.sub(r"[^A-Za-z0-9_-]", "", name.strip().replace(" ", "_"))
-        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        base = OUTPUT_DIR / (f"{stamp}_{clean}" if clean else stamp)
+        now = datetime.now()
+        stamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+        base = recording_dir(now) / (f"{stamp}_{clean}" if clean else stamp)
         self.final = base.with_suffix(".mp3")
         self.pa = pa.PyAudio()
         try:
@@ -587,11 +587,43 @@ class Recorder:
 # --------------------------------------------------------------------------
 # Archivos
 # --------------------------------------------------------------------------
+def recording_dir(when: Optional[datetime] = None) -> Path:
+    """grabaciones/AAAA/MM/DD (se crea si no existe)."""
+    when = when or datetime.now()
+    d = OUTPUT_DIR / f"{when:%Y}" / f"{when:%m}" / f"{when:%d}"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+_DATE_PREFIX = re.compile(r"^(\d{4})-(\d{2})-(\d{2})_")
+
+
+def migrate_legacy(log: Log = print) -> int:
+    """Mueve los archivos sueltos de grabaciones/ (nombre AAAA-MM-DD_...) a AAAA/MM/DD."""
+    if not OUTPUT_DIR.exists():
+        return 0
+    moved = 0
+    for p in list(OUTPUT_DIR.iterdir()):
+        m = _DATE_PREFIX.match(p.name)
+        if not p.is_file() or not m:
+            continue
+        dest_dir = OUTPUT_DIR / m[1] / m[2] / m[3]
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / p.name
+        if dest.exists():
+            continue
+        shutil.move(str(p), str(dest))
+        moved += 1
+    if moved:
+        log(f"Se ordenaron {moved} archivos antiguos en carpetas año/mes/día.")
+    return moved
+
+
 def list_recordings() -> list[Path]:
     if not OUTPUT_DIR.exists():
         return []
-    files = [p for p in OUTPUT_DIR.iterdir()
-             if p.suffix.lower() in AUDIO_EXT and ".sys." not in p.name and ".mic." not in p.name]
+    files = [p for p in OUTPUT_DIR.rglob("*")
+             if p.is_file() and p.suffix.lower() in AUDIO_EXT and ".sys." not in p.name and ".mic." not in p.name]
     return sorted(files, key=lambda p: p.name, reverse=True)
 
 
@@ -620,9 +652,9 @@ def convert_to_wav(src: Path, log: Log = print) -> Path:
     ff = find_ffmpeg()
     if not ff:
         raise RuntimeError("ffmpeg no disponible")
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     base = re.sub(r"[^A-Za-z0-9_-]", "", src.stem.replace(" ", "_"))
-    out = OUTPUT_DIR / f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{base}.wav"
+    now = datetime.now()
+    out = recording_dir(now) / f"{now:%Y-%m-%d_%H-%M-%S}_{base}.wav"
     log(f"Convirtiendo {src.name} ...")
     r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(src), "-ar", "16000", "-ac", "1",
                         "-c:a", "pcm_s16le", str(out)], capture_output=True, text=True,

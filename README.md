@@ -203,6 +203,20 @@ modelos de WhisperX se descargan la primera vez (varios GB para `large-v3`).
   (botón **Abrir carpeta de logs**). Pip reintenta hasta 10 veces ante cortes de red.
 - Si cambias de Python o algo queda corrupto: borra la carpeta `.venv` y abre `iniciar.bat` de nuevo.
 
+### Carpetas, resumen y proveedores (Windows)
+
+- Las grabaciones, transcripciones y resúmenes se guardan en `grabaciones/AAAA/MM/DD/`
+  (p. ej. `grabaciones/2026/10/14/`). Al abrir la app, los archivos antiguos sueltos en `grabaciones/`
+  se ordenan solos en esa estructura.
+- El botón **Resumen** (sección 4) genera `NOMBRE.resumen.md` junto a la transcripción, con: **Resumen**,
+  **Key discussion points**, **Decisiones**, **Action items** (tabla acción/responsable/fecha) y **pendientes/riesgos**.
+- El prompt vive en [`prompts/resumen.md`](prompts/resumen.md): edítalo para cambiar el formato o el tono
+  (`{{TRANSCRIPCION}}` marca dónde se inserta el texto). También sirve para pegarlo en cualquier chat de IA.
+- Proveedores: **Ollama** (local, gratis, nada sale de tu PC; instala [Ollama](https://ollama.com/download)
+  y la app descarga el modelo, ~5 GB, con barra de progreso), **Claude**, **Gemini** (tiene plan gratuito) y
+  **ChatGPT** por API key. La key se guarda en `.api_keys.json` (ignorado por git) y se cambia con **Editar**.
+  El campo Modelo es editable por si cambian los nombres. Con APIs en la nube la transcripción se envía al proveedor.
+
 ### Token de Hugging Face: ¿para qué y es gratis?
 
 Solo sirve para **Identificar hablantes** (quién dijo qué). Sin token la transcripción funciona igual,

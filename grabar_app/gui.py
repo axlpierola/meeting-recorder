@@ -10,24 +10,26 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from . import core
+from . import core, resumen
 
 
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Grabador + Transcriptor de reuniones")
-        self.geometry("860x760")
-        self.minsize(760, 640)
+        self.geometry("860x930")
+        self.minsize(760, 800)
         self.q: queue.Queue = queue.Queue()
         self.rec: core.Recorder | None = None
         self.transcription: core.Transcription | None = None
         self.devs: dict | None = None
         self.files: list[Path] = []
+        self._sent_ok: set[str] = set()
         self._build()
         self.after(100, self._pump)
         self.after(300, self.refresh_env)
-        self.refresh_files()
+        threading.Thread(target=lambda: core.migrate_legacy(self.log), daemon=True).start()
+        self.after(600, self.refresh_files)
 
     # ---------------------------------------------------------------- UI
     def _build(self) -> None:
@@ -94,7 +96,7 @@ class App(tk.Tk):
         side.pack(side="left", padx=8, fill="y")
         ttk.Button(side, text="Actualizar lista", command=self.refresh_files).pack(fill="x", pady=1)
         ttk.Button(side, text="Importar video/audio…", command=self.import_file).pack(fill="x", pady=1)
-        ttk.Button(side, text="Abrir carpeta", command=lambda: core.open_folder(core.OUTPUT_DIR)).pack(fill="x", pady=1)
+        ttk.Button(side, text="Abrir carpeta", command=self.open_selected_folder).pack(fill="x", pady=1)
         ttk.Button(side, text="Ver transcripción", command=self.open_md).pack(fill="x", pady=1)
 
         opt = ttk.Frame(tr)
@@ -135,6 +137,40 @@ class App(tk.Tk):
         self.log_box = tk.Text(tr, height=9, wrap="word", state="disabled")
         self.log_box.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self.log_box.tag_config("err", foreground="#c62828")
+
+        sm = ttk.LabelFrame(self, text="4. Resumen (resumen · key discussion points · action items)")
+        sm.pack(fill="x", **pad)
+        r1 = ttk.Frame(sm)
+        r1.pack(fill="x", padx=6, pady=(4, 2))
+        ttk.Label(r1, text="Proveedor:").pack(side="left")
+        self.prov_var = tk.StringVar(value=next(iter(resumen.PROVIDERS)))
+        pc = ttk.Combobox(r1, textvariable=self.prov_var, values=list(resumen.PROVIDERS), width=22, state="readonly")
+        pc.pack(side="left", padx=4)
+        pc.bind("<<ComboboxSelected>>", lambda _e: self._provider_changed())
+        ttk.Label(r1, text="Modelo:").pack(side="left", padx=(10, 0))
+        self.sum_model_var = tk.StringVar()
+        self.sum_model_cb = ttk.Combobox(r1, textvariable=self.sum_model_var, width=24)
+        self.sum_model_cb.pack(side="left", padx=4)
+        r2 = ttk.Frame(sm)
+        r2.pack(fill="x", padx=6, pady=2)
+        ttk.Label(r2, text="API key:").pack(side="left")
+        self.key_var = tk.StringVar()
+        self.key_entry = ttk.Entry(r2, textvariable=self.key_var, show="•")
+        self.key_entry.pack(side="left", fill="x", expand=True, padx=4)
+        self.btn_key = ttk.Button(r2, width=8, command=self.toggle_key)
+        self.btn_key.pack(side="left", padx=(0, 4))
+        self.btn_getkey = ttk.Button(r2, text="Obtener key", command=self.open_key_page)
+        self.btn_getkey.pack(side="left")
+        self.sum_hint = ttk.Label(sm, text="", foreground="#666666", wraplength=780, justify="left")
+        self.sum_hint.pack(fill="x", padx=6)
+        r3 = ttk.Frame(sm)
+        r3.pack(fill="x", padx=6, pady=(2, 6))
+        self.btn_sum = ttk.Button(r3, text="Resumen", command=self.start_summary)
+        self.btn_sum.pack(side="left")
+        ttk.Button(r3, text="Ver resumen", command=self.open_summary).pack(side="left", padx=6)
+        self.sprog_label = ttk.Label(r3, text="")
+        self.sprog = ttk.Progressbar(r3, mode="indeterminate", length=220)
+        self._provider_changed()
 
     # ----------------------------------------------------------- helpers
     def log(self, msg: str) -> None:
@@ -324,7 +360,9 @@ class App(tk.Tk):
         self.files = core.list_recordings()
         self.listbox.delete(0, "end")
         for f in self.files:
-            self.listbox.insert("end", f"{f.name}{'   ✔ transcrito' if f.with_suffix('.md').exists() else ''}")
+            marks = ("   ✔ transcrito" if f.with_suffix(".md").exists() else "") + (
+                "   ✔ resumen" if resumen.summary_path(f.with_suffix(".md")).exists() else "")
+            self.listbox.insert("end", f"{f.relative_to(core.OUTPUT_DIR).as_posix()}{marks}")
         if self.files:
             idx = self.files.index(select) if select in self.files else 0
             self.listbox.selection_set(idx)
@@ -416,6 +454,138 @@ class App(tk.Tk):
     def cancel_transcribe(self) -> None:
         if self.transcription:
             self.transcription.cancel()
+
+    # ----------------------------------------------------------- resumen
+    def _prov(self) -> dict:
+        return resumen.PROVIDERS[self.prov_var.get()]
+
+    def _provider_changed(self) -> None:
+        p = self._prov()
+        self.sum_model_cb.config(values=p["models"])
+        self.sum_model_var.set(p["models"][0])
+        if p["needs_key"]:
+            self.key_var.set(resumen.load_key(p["id"]))
+            self.btn_getkey.config(state="normal")
+            self._key_locked(bool(self.key_var.get()))
+            self.sum_hint.config(text="La transcripción se envía a ese proveedor para generar el resumen. "
+                                      "La key se guarda solo en esta PC (.api_keys.json). Gemini ofrece un plan gratuito.")
+        else:
+            self.key_var.set("")
+            self.key_entry.config(state="disabled")
+            self.btn_key.config(state="disabled", text="Guardar")
+            self.btn_getkey.config(text="Instalar Ollama", state="normal")
+            self.sum_hint.config(text="100% local y gratis: nada sale de tu PC. Ollama debe estar instalado; "
+                                      "el modelo (~5 GB) se descarga la primera vez con barra de progreso.")
+        if p["needs_key"]:
+            self.btn_getkey.config(text="Obtener key")
+
+    def _key_locked(self, locked: bool) -> None:
+        self.key_entry.config(state="disabled" if locked else "normal")
+        self.btn_key.config(state="normal", text="Editar" if locked else "Guardar")
+
+    def toggle_key(self) -> None:
+        if str(self.key_entry.cget("state")) == "disabled":
+            self._key_locked(False)
+            self.key_entry.focus_set()
+        else:
+            resumen.save_key(self._prov()["id"], self.key_var.get())
+            self.key_var.set(self.key_var.get().strip())
+            self._key_locked(bool(self.key_var.get()))
+            self.log("API key guardada." if self.key_var.get() else "API key borrada.")
+
+    def open_key_page(self) -> None:
+        webbrowser.open(self._prov()["key_url"])
+
+    def start_summary(self) -> None:
+        f = self._selected()
+        md = f.with_suffix(".md") if f else None
+        if not md or not md.exists():
+            messagebox.showinfo("Resumen", "Primero transcribí la grabación seleccionada (hace falta el .md).")
+            return
+        p = self._prov()
+        pid, model, key = p["id"], self.sum_model_var.get().strip(), self.key_var.get().strip()
+        if p["needs_key"]:
+            if not key:
+                messagebox.showwarning("Resumen", "Pegá la API key y pulsá Guardar (botón 'Obtener key' abre la página).")
+                return
+            if pid not in self._sent_ok and not messagebox.askokcancel(
+                    "Enviar transcripción", f"La transcripción se enviará a {self.prov_var.get()} para resumirla.\n\n"
+                    "¿Continuar? (Para que no salga de tu PC usá Ollama.)"):
+                return
+            self._sent_ok.add(pid)
+        elif (installed := resumen.ollama_models()) is not None and not any(
+                m == model or m == f"{model}:latest" for m in installed):
+            if not messagebox.askyesno("Descargar modelo", f"El modelo '{model}' no está en Ollama.\n\n"
+                                       "¿Descargarlo ahora? (~5 GB, solo la primera vez)"):
+                return
+        self.btn_sum.config(state="disabled")
+        t0 = time.monotonic()
+        st = {"running": True, "text": "Preparando ..."}
+        self.sprog_label.pack(side="left", padx=(12, 4))
+        self.sprog.pack(side="left")
+        self.sprog.config(mode="indeterminate", value=0)
+        self.sprog.start(12)
+
+        def tick() -> None:
+            if st["running"]:
+                m, s = divmod(int(time.monotonic() - t0), 60)
+                self.sprog_label.config(text=f"{st['text']}  ·  {m:02d}:{s:02d}")
+                self.after(500, tick)
+
+        def on_pull(status: str, pct: int, detail: str) -> None:
+            def upd() -> None:
+                if pct >= 0:
+                    if str(self.sprog.cget("mode")) != "determinate":
+                        self.sprog.stop()
+                        self.sprog.config(mode="determinate", maximum=100)
+                    self.sprog.config(value=pct)
+                    st["text"] = f"Descargando modelo {model}: {pct}% ({detail})"
+                else:
+                    st["text"] = f"Ollama: {status}"
+            self.q.put(("call", upd))
+
+        def work():
+            if pid == "ollama":
+                models = resumen.ensure_ollama(self.log)
+                if not any(m == model or m == f"{model}:latest" for m in models):
+                    resumen.pull_model(model, on_pull, self.log)
+                def to_indet() -> None:
+                    self.sprog.config(mode="indeterminate")
+                    self.sprog.start(12)
+                self.q.put(("call", to_indet))
+            st["text"] = f"Generando resumen con {self.prov_var.get()} ..."
+            return resumen.summarize(md, pid, model, key, self.log)
+
+        def done(out, err):
+            st["running"] = False
+            self.sprog.stop()
+            self.sprog.pack_forget()
+            self.sprog_label.pack_forget()
+            self.btn_sum.config(state="normal")
+            self.refresh_files(select=f)
+            if err and "ollama.com/download" in str(err):
+                webbrowser.open("https://ollama.com/download")
+            if out:
+                self.log(f"✔ Resumen guardado: {out}")
+                os.startfile(str(out)) if core.IS_WIN else core.open_folder(out.parent)
+
+        tick()
+        self._bg(work, done)
+
+    def open_summary(self) -> None:
+        f = self._selected()
+        out = resumen.summary_path(f.with_suffix(".md")) if f else None
+        if not out or not out.exists():
+            messagebox.showinfo("Resumen", "Esta grabación todavía no tiene resumen.")
+            return
+        if core.IS_WIN:
+            os.startfile(str(out))  # type: ignore[attr-defined]
+        else:
+            core.open_folder(out.parent)
+
+    def open_selected_folder(self) -> None:
+        f = self._selected()
+        core.open_folder(f.parent if f else core.OUTPUT_DIR)
 
     def open_md(self) -> None:
         f = self._selected()
