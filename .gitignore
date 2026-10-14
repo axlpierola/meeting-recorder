@@ -1,0 +1,13 @@
+# Grabaciones y transcripciones (datos privados, ~9 GB) — nunca al repo
+grabaciones/*
+!grabaciones/.gitkeep
+
+# Audio/transcripciones sueltas
+*.wav
+*.mp3
+*.mp4
+*.m4a
+
+# Secretos y entorno
+.env
+*.env
