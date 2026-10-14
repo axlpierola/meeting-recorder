@@ -11,3 +11,9 @@ grabaciones/*
 # Secretos y entorno
 .env
 *.env
+
+# Versión Python/Windows
+.venv/
+.tools/
+__pycache__/
+*.pyc

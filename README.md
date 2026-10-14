@@ -4,7 +4,7 @@ Script de terminal que graba **el audio del sistema (lo que escuchás) + tu micr
 tiempo y después lo transcribe con [WhisperX](https://github.com/m-bain/whisperX), opcionalmente
 identificando quién habla. Pensado para reuniones de Slack, Meet, Zoom o Teams.
 
-Funciona en **macOS** (Apple Silicon o Intel) y **Linux** (Ubuntu con PipeWire/PulseAudio).
+Funciona en **macOS** (Apple Silicon o Intel), **Linux** (Ubuntu con PipeWire/PulseAudio) y **Windows** (versión Python con interfaz gráfica, ver [Windows](#windows)).
 
 ## Qué hace
 
@@ -163,3 +163,30 @@ Para ver los nombres exactos de tus dispositivos: opción `6` del menú, o
   licencias de los dos modelos.
 - **La primera transcripción tarda mucho:** está bajando el modelo (~3 GB large-v3,
   ~1.5 GB medium). Queda cacheado en `~/.cache/huggingface/`.
+
+
+## Windows
+
+La versión de Windows es una app en Python (`grabar_app/`) con **interfaz gráfica** y menú de terminal.
+No hace falta instalar drivers de audio ni ffmpeg a mano ni ser administrador.
+
+**Qué necesitás:** solo Python 3.10–3.12 (`winget install Python.Python.3.12`, marcando "Add to PATH").
+
+```bat
+iniciar.bat          :: interfaz gráfica
+iniciar.bat cli      :: menú de terminal
+```
+
+La primera vez crea un entorno `.venv` e instala `PyAudioWPatch` (captura del audio del sistema
+por WASAPI loopback, sin "Mezcla estéreo" ni VB-Cable) e `imageio-ffmpeg` (ffmpeg incluido).
+Luego la app **verifica el entorno** (arriba de la ventana) y, si falta algo, te dice qué hacer.
+WhisperX se instala desde el botón **Instalar WhisperX**: si detecta una GPU NVIDIA instala PyTorch
+con CUDA y usará la GPU automáticamente.
+
+Flujo: elegí salida y micrófono → **Grabar** → **Parar** → seleccioná la grabación → **Transcribir**.
+También podés **Importar video/audio** (mp4, m4a, ...) para transcribir una reunión ya grabada.
+Los archivos quedan en `grabaciones/` igual que en las otras plataformas. Para identificar hablantes
+pegá el token de Hugging Face en la GUI (no se guarda) o definí `HF_TOKEN` con `setx HF_TOKEN "hf_xxx"`.
+
+Notas: se graba el dispositivo de salida activo (si cambiás de auriculares, elegilo en la lista); los
+modelos de WhisperX se descargan la primera vez (varios GB para `large-v3`).
