@@ -108,15 +108,19 @@ class App(tk.Tk):
         ttk.Entry(opt, textvariable=self.lang_var, width=4).pack(side="left", padx=4)
         ttk.Label(opt, text="Cómputo:").pack(side="left", padx=(10, 0))
         self.dev_var = tk.StringVar(value="auto")
-        ttk.Combobox(opt, textvariable=self.dev_var, values=["auto", "cuda", "cpu"], width=6,
+        ttk.Combobox(opt, textvariable=self.dev_var, values=["auto", "gpu", "cpu"], width=6,
                      state="readonly").pack(side="left", padx=4)
         self.diar_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(opt, text="Identificar hablantes", variable=self.diar_var).pack(side="left", padx=10)
         tk_row = ttk.Frame(tr)
         tk_row.pack(fill="x", padx=6, pady=4)
         ttk.Label(tk_row, text="Token HF:").pack(side="left")
-        self.token_var = tk.StringVar(value=os.environ.get("HF_TOKEN", ""))
-        ttk.Entry(tk_row, textvariable=self.token_var, show="•").pack(side="left", fill="x", expand=True, padx=4)
+        self.token_var = tk.StringVar(value=core.load_hf_token())
+        self.token_entry = ttk.Entry(tk_row, textvariable=self.token_var, show="•")
+        self.token_entry.pack(side="left", fill="x", expand=True, padx=4)
+        self.btn_token = ttk.Button(tk_row, width=8, command=self.toggle_token)
+        self.btn_token.pack(side="left", padx=(0, 4))
+        self._token_locked(bool(self.token_var.get()))
         self.btn_tr = ttk.Button(tk_row, text="Transcribir", command=self.start_transcribe)
         ttk.Button(tk_row, text="¿Qué es?", width=8, command=self.explain_token).pack(side="left", padx=(0, 4))
         self.btn_tr.pack(side="left", padx=4)
@@ -259,6 +263,21 @@ class App(tk.Tk):
         tick()
         self._bg(lambda: fn(on_line, on_progress), done)
 
+    def _token_locked(self, locked: bool) -> None:
+        self.token_entry.config(state="disabled" if locked else "normal")
+        self.btn_token.config(text="Editar" if locked else "Guardar")
+
+    def toggle_token(self) -> None:
+        if str(self.token_entry.cget("state")) == "disabled":
+            self._token_locked(False)
+            self.token_entry.focus_set()
+        else:
+            core.save_hf_token(self.token_var.get())
+            self.token_var.set(self.token_var.get().strip())
+            self._token_locked(bool(self.token_var.get()))
+            self.log("Token de Hugging Face guardado." if self.token_var.get() else "Token de Hugging Face borrado.")
+            self.refresh_env()
+
     def explain_token(self) -> None:
         if messagebox.askyesno("Token de Hugging Face", core.HF_HELP + "\n\n¿Abrir la página para crear el token?"):
             webbrowser.open("https://huggingface.co/settings/tokens")
@@ -326,7 +345,11 @@ class App(tk.Tk):
         if not core._has_module("whisperx"):
             messagebox.showwarning("Transcribir", "WhisperX no está instalado. Usá el botón 'Instalar WhisperX'.")
             return
-        dev = None if self.dev_var.get() == "auto" else self.dev_var.get()
+        dev = {"auto": None, "gpu": "cuda", "cpu": "cpu"}[self.dev_var.get()]
+        if dev == "cuda" and not core.cuda_available():
+            messagebox.showwarning("Transcribir", "Tu PyTorch no tiene soporte de GPU (CUDA). Usá 'cpu' o 'auto', "
+                                   "o pulsá 'Instalar WhisperX' para reinstalar PyTorch con GPU.")
+            return
         self.transcription = core.Transcription(f, self.model_var.get(), self.lang_var.get().strip() or "es",
                                                 self.diar_var.get(), self.token_var.get().strip(), dev)
         t = self.transcription

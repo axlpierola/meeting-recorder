@@ -211,4 +211,12 @@ sin separar voces. Es **gratis** (cuenta, token y modelos); todo se procesa en t
 1. Crea una cuenta en https://huggingface.co.
 2. Acepta las condiciones (botón *Agree*) en `pyannote/speaker-diarization-3.1` y `pyannote/segmentation-3.0`.
 3. Crea un token *Read* en https://huggingface.co/settings/tokens y pégalo en el campo **Token HF**
-   (el botón **¿Qué es?** de la app explica esto y abre la página).
+   (el botón **¿Qué es?** de la app explica esto y abre la página). Pulsa **Guardar**: queda en `.hf_token`
+   (ignorado por git) y el campo se bloquea; usa **Editar** para cambiarlo.
+
+### GPU (Windows)
+
+El selector **Cómputo** tiene `auto`, `gpu` y `cpu`. WhisperX instala su propio PyTorch (solo CPU), por eso
+el botón **Instalar WhisperX** lo reemplaza al final por la misma versión con CUDA si detecta una GPU NVIDIA.
+Si `gpu` avisa que PyTorch no tiene CUDA, pulsa **Instalar WhisperX** de nuevo. Los avisos de `torchcodec`
+en el log son inofensivos. La primera transcripción descarga varios GB de modelos (puede tardar con red lenta).

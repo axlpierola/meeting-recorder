@@ -202,7 +202,7 @@ def check_environment() -> list[Check]:
         checks.append(Check("gpu", "GPU NVIDIA", True,
                             "no detectada: se usará CPU (modelo 'medium' recomendado)", required=False))
 
-    tok = bool(os.environ.get("HF_TOKEN"))
+    tok = bool(load_hf_token())
     checks.append(Check("hf", "Token Hugging Face (hablantes)", tok,
                         "definido" if tok else "no definido: solo hace falta para identificar hablantes",
                         "Opcional y gratis. Pegalo en el campo 'Token HF' (botón '¿Qué es?' explica cómo obtenerlo)",
@@ -324,6 +324,36 @@ def install_audio_deps(log: Log, progress=None) -> bool:
     return True
 
 
+def _torch_versions() -> dict[str, str]:
+    code = ("import importlib.metadata as m;"
+            "print(';'.join(n+'='+m.version(n) for n in ('torch','torchaudio','torchvision') "
+            "if __import__('importlib.util').util.find_spec(n)))")
+    r = subprocess.run([PYTHON, "-c", code], capture_output=True, text=True, creationflags=_no_window())
+    return dict(kv.split("=", 1) for kv in r.stdout.strip().split(";") if "=" in kv)
+
+
+TOKEN_FILE = APP_DIR / ".hf_token"
+
+
+def load_hf_token() -> str:
+    """Token guardado por la app (archivo local, ignorado por git) o variable HF_TOKEN."""
+    try:
+        t = TOKEN_FILE.read_text(encoding="utf-8").strip()
+        if t:
+            return t
+    except OSError:
+        pass
+    return os.environ.get("HF_TOKEN", "").strip()
+
+
+def save_hf_token(token: str) -> None:
+    token = token.strip()
+    if token:
+        TOKEN_FILE.write_text(token, encoding="utf-8")
+    else:
+        TOKEN_FILE.unlink(missing_ok=True)
+
+
 def _free_gb(path: Path) -> float:
     return shutil.disk_usage(path).free / 1024 ** 3
 
@@ -336,17 +366,25 @@ def install_whisperx(log: Log, progress=None) -> bool:
     log(f"Espacio libre en la unidad: {free:.1f} GB (se necesitan ~8 GB).")
     if free < 8:
         raise InstallError(f"Solo hay {free:.1f} GB libres; hacen falta ~8 GB. Liberá espacio y reintentá.")
-    log("Paso 1/3: PyTorch (descarga de ~2.7 GB con GPU, puede tardar 5-20 min según tu internet) ...")
-    if nvidia_gpu():
-        log("GPU NVIDIA detectada: instalando PyTorch con CUDA ...")
-        rc, _ = _pip(["torch", "torchaudio", "--index-url", CUDA_INDEX], log, progress)
-        if rc != 0:
-            log("No se pudo instalar PyTorch con CUDA; se continuará con la versión por defecto (CPU).")
-    log("Paso 2/3: WhisperX y sus dependencias ...")
+    gpu = nvidia_gpu()
+    steps = 3 if gpu else 2
+    log(f"Paso 1/{steps}: WhisperX y sus dependencias (incluye PyTorch, puede tardar 5-20 min) ...")
     rc, lines = _pip(["--upgrade", "whisperx"], log, progress)
     if rc != 0:
         raise _fail("La instalación de WhisperX", lines, rc)
-    log("Paso 3/3: verificando que WhisperX arranca ...")
+    if gpu:
+        # WhisperX fija su propia versión de torch (CPU en Windows): se reemplaza por la
+        # misma versión compilada con CUDA. Debe hacerse DESPUÉS de instalar WhisperX.
+        log("Paso 2/3: GPU NVIDIA detectada, cambiando PyTorch a la versión con CUDA (~2.7 GB) ...")
+        vers = _torch_versions()
+        pk = [f"{n}=={v.split('+')[0]}" for n, v in vers.items()] or ["torch", "torchaudio"]
+        rc, lines = _pip(["--force-reinstall", "--no-deps", *pk, "--index-url", CUDA_INDEX], log, progress)
+        if rc != 0:
+            raise _fail("La instalación de PyTorch con CUDA (WhisperX quedó instalado pero solo en CPU)", lines, rc)
+        _cuda_cache = None
+        if not cuda_available():
+            log("Aviso: PyTorch se instaló pero CUDA no está disponible; actualizá el driver de NVIDIA.")
+    log(f"Paso {steps}/{steps}: verificando que WhisperX arranca ...")
     r = subprocess.run([PYTHON, "-c", "import whisperx"], capture_output=True, text=True,
                        env=prepare_env(), creationflags=_no_window())
     if r.returncode != 0:
@@ -600,7 +638,7 @@ class Transcription:
     def __init__(self, audio: Path, model: str = "medium", language: str = "es",
                  diarize: bool = False, hf_token: str = "", device: Optional[str] = None):
         self.audio, self.model, self.language = Path(audio), model, language
-        self.diarize, self.hf_token = diarize, hf_token or os.environ.get("HF_TOKEN", "")
+        self.diarize, self.hf_token = diarize, hf_token or load_hf_token()
         self.device = device or default_device()
         self._proc: Optional[subprocess.Popen] = None
         self._cancelled = False

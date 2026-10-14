@@ -18,3 +18,4 @@ grabaciones/*
 __pycache__/
 *.pyc
 logs/
+.hf_token
