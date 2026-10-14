@@ -237,9 +237,9 @@ class App(tk.Tk):
             self.after(500, tick)
 
         def on_line(line: str) -> None:
-            if line.strip():
+            # la salida de pip va solo a logs/instalacion.log; aquí solo se muestra como estado
+            if line.strip() and not line.startswith(("  ", "Requirement already")):
                 state["msg"] = line.strip()[:80]
-            self.log(line)
 
         def on_progress(cur: int, total: int) -> None:
             def upd() -> None:
@@ -266,7 +266,7 @@ class App(tk.Tk):
             self.refresh_env()
 
         tick()
-        self._bg(lambda: fn(on_line, on_progress), done)
+        self._bg(lambda: fn(self.log, on_progress, on_line), done)
 
     def _token_locked(self, locked: bool) -> None:
         self.token_entry.config(state="disabled" if locked else "normal")
@@ -396,7 +396,7 @@ class App(tk.Tk):
                     self.tprog.start(12)
                 self.q.put(("call", reset))
                 self.log(f"▶ {stage}")
-            self.log(line)
+            # el resto de la salida de WhisperX (avisos, trazas) solo va a logs/transcripcion.log
 
         def done(res, err):
             st["running"] = False
@@ -411,7 +411,7 @@ class App(tk.Tk):
                 messagebox.showinfo("Transcripción lista", str(res))
 
         tick()
-        self._bg(lambda: t.run(on_line), done)
+        self._bg(lambda: t.run(self.log, on_line), done)
 
     def cancel_transcribe(self) -> None:
         if self.transcription:

@@ -70,6 +70,8 @@ def prepare_env() -> dict:
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     env.setdefault("NLTK_DATA", str(APP_DIR / ".nltk_data"))  # datos de NLTK dentro del proyecto (evita rutas de perfil)
+    # torchcodec no carga (faltan DLL de ffmpeg compartido) pero WhisperX no lo usa: se silencia ese aviso
+    env["PYTHONWARNINGS"] = "ignore::UserWarning:pyannote.audio.core.io"
     env["PYTHONUNBUFFERED"] = "1"  # sin esto el log de WhisperX llega a la GUI recién al terminar
     env["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
     if shutil.which("ffmpeg") is None:
@@ -303,7 +305,8 @@ def diagnose(lines: list[str]) -> str:
 
 
 def _run_stream(cmd: list[str], log: Log, env: Optional[dict] = None,
-                progress: Optional[Callable[[int, int], None]] = None) -> tuple[int, list[str]]:
+                progress: Optional[Callable[[int, int], None]] = None,
+                on_output: Optional[Log] = None) -> tuple[int, list[str]]:
     """Ejecuta cmd mostrando la salida en vivo y guardándola en logs/instalacion.log.
     Las líneas 'Progress X of Y' de pip (--progress-bar raw) alimentan `progress`."""
     LOG_DIR.mkdir(exist_ok=True)
@@ -325,7 +328,7 @@ def _run_stream(cmd: list[str], log: Log, env: Optional[dict] = None,
                 continue
             lines.append(line)
             lf.write(line + "\n")
-            log(line)
+            (on_output or log)(line)
         rc = proc.wait()
         lf.write(f"===== código de salida: {rc}\n")
     return rc, lines
@@ -335,8 +338,8 @@ _PIP = ["-m", "pip", "install", "--no-input", "--progress-bar", "raw",
         "--retries", "10", "--timeout", "60"]
 
 
-def _pip(args: list[str], log: Log, progress=None) -> tuple[int, list[str]]:
-    return _run_stream([PYTHON, *_PIP, *args], log, progress=progress)
+def _pip(args: list[str], log: Log, progress=None, on_output=None) -> tuple[int, list[str]]:
+    return _run_stream([PYTHON, *_PIP, *args], log, progress=progress, on_output=on_output)
 
 
 def _fail(what: str, lines: list[str], rc: int) -> InstallError:
@@ -344,10 +347,10 @@ def _fail(what: str, lines: list[str], rc: int) -> InstallError:
                         f"Log completo: {LOG_FILE}")
 
 
-def install_audio_deps(log: Log, progress=None) -> bool:
+def install_audio_deps(log: Log, progress=None, on_output=None) -> bool:
     pkgs = ["imageio-ffmpeg"] + (["PyAudioWPatch"] if IS_WIN else [])
     log(f"Instalando {', '.join(pkgs)} ...")
-    rc, lines = _pip(["--upgrade", *pkgs], log, progress)
+    rc, lines = _pip(["--upgrade", *pkgs], log, progress, on_output)
     if rc != 0:
         raise _fail("La instalación de audio/ffmpeg", lines, rc)
     return True
@@ -387,7 +390,7 @@ def _free_gb(path: Path) -> float:
     return shutil.disk_usage(path).free / 1024 ** 3
 
 
-def install_whisperx(log: Log, progress=None) -> bool:
+def install_whisperx(log: Log, progress=None, on_output=None) -> bool:
     """Si hay GPU NVIDIA instala primero PyTorch con CUDA; luego WhisperX."""
     global _cuda_cache
     _cuda_cache = None
@@ -398,7 +401,7 @@ def install_whisperx(log: Log, progress=None) -> bool:
     gpu = nvidia_gpu()
     steps = 3 if gpu else 2
     log(f"Paso 1/{steps}: WhisperX y sus dependencias (incluye PyTorch, puede tardar 5-20 min) ...")
-    rc, lines = _pip(["--upgrade", "whisperx"], log, progress)
+    rc, lines = _pip(["--upgrade", "whisperx", "hf_xet"], log, progress, on_output)
     if rc != 0:
         raise _fail("La instalación de WhisperX", lines, rc)
     if gpu:
@@ -407,7 +410,7 @@ def install_whisperx(log: Log, progress=None) -> bool:
         log("Paso 2/3: GPU NVIDIA detectada, cambiando PyTorch a la versión con CUDA (~2.7 GB) ...")
         vers = _torch_versions()
         pk = [f"{n}=={v.split('+')[0]}" for n, v in vers.items()] or ["torch", "torchaudio"]
-        rc, lines = _pip(["--force-reinstall", "--no-deps", *pk, "--index-url", CUDA_INDEX], log, progress)
+        rc, lines = _pip(["--force-reinstall", "--no-deps", *pk, "--index-url", CUDA_INDEX], log, progress, on_output)
         if rc != 0:
             raise _fail("La instalación de PyTorch con CUDA (WhisperX quedó instalado pero solo en CPU)", lines, rc)
         _cuda_cache = None
@@ -419,7 +422,7 @@ def install_whisperx(log: Log, progress=None) -> bool:
     if r.returncode != 0:
         tail = r.stderr.strip().splitlines()
         for ln in tail[-15:]:
-            log(ln)
+            (on_output or log)(ln)
         raise InstallError("WhisperX se instaló pero falla al importarse:\n" + "\n".join(tail[-3:])
                            + f"\n\nPosible causa: {diagnose(tail)}\n"
                            "Si menciona 'DLL', instalá 'Microsoft Visual C++ Redistributable 2015-2022 x64'.")
@@ -692,7 +695,9 @@ class Transcription:
                 return "Causa probable: " + msg
         return "Causa no reconocida: mirá las últimas líneas del log."
 
-    def run(self, log: Log = print) -> Optional[Path]:
+    def run(self, log: Log = print, on_output: Optional[Log] = None) -> Optional[Path]:
+        """`log`: mensajes de la app (se muestran al usuario). `on_output`: salida cruda de WhisperX;
+        siempre va a logs/transcripcion.log y, si no se da on_output, también a `log` (CLI)."""
         if not _has_module("whisperx"):
             raise RuntimeError("WhisperX no está instalado")
         if self.diarize and not self.hf_token:
@@ -721,7 +726,7 @@ class Transcription:
             line = line.rstrip()
             if self.hf_token:
                 line = line.replace(self.hf_token, "hf_***")
-            log(line)
+            (on_output or log)(line)
             tail.append(line)
             lf.write(line + "\n")
         lf.close()
