@@ -127,6 +127,11 @@ class App(tk.Tk):
         self.btn_cancel = ttk.Button(tk_row, text="Cancelar", command=self.cancel_transcribe, state="disabled")
         self.btn_cancel.pack(side="left")
 
+        self.tprog_frame = ttk.Frame(tr)
+        self.tprog_label = ttk.Label(self.tprog_frame, text="", anchor="w")
+        self.tprog_label.pack(fill="x")
+        self.tprog = ttk.Progressbar(self.tprog_frame, mode="indeterminate")
+        self.tprog.pack(fill="x", pady=(2, 0))
         self.log_box = tk.Text(tr, height=9, wrap="word", state="disabled")
         self.log_box.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self.log_box.tag_config("err", foreground="#c62828")
@@ -355,15 +360,58 @@ class App(tk.Tk):
         t = self.transcription
         self.btn_tr.config(state="disabled")
         self.btn_cancel.config(state="normal")
+        t0 = time.monotonic()
+        st = {"running": True, "stage": "Iniciando ...", "bar": ""}
+        self.tprog_frame.pack(fill="x", padx=6, pady=(0, 4), before=self.log_box)
+        self.tprog.config(mode="indeterminate", value=0)
+        self.tprog.start(12)
+
+        def tick() -> None:
+            if st["running"]:
+                m, s = divmod(int(time.monotonic() - t0), 60)
+                self.tprog_label.config(text=f"{st['stage']}{st['bar']}   ·   {m:02d}:{s:02d}")
+                self.after(500, tick)
+
+        def set_bar(label: str, pct: int, detail: str) -> None:
+            if str(self.tprog.cget("mode")) != "determinate":
+                self.tprog.stop()
+                self.tprog.config(mode="determinate", maximum=100)
+            self.tprog.config(value=pct)
+            st["bar"] = f"  {pct}% ({detail})"
+
+        def on_line(line: str) -> None:
+            prog = core.parse_progress(line)
+            if prog:
+                label, pct, detail = prog
+                is_dl = detail.split("/")[-1][-1:] in ("k", "M", "G", "B")
+                self.q.put(("call", lambda: set_bar(label, pct, detail)))
+                if is_dl:
+                    st["stage"] = f"Descargando modelo{': ' + label if label else ''} (solo la primera vez)"
+                return  # las barras no se vuelcan al log
+            stage = core.stage_of(line)
+            if stage:
+                st["stage"], st["bar"] = stage, ""
+                def reset() -> None:
+                    self.tprog.config(mode="indeterminate")
+                    self.tprog.start(12)
+                self.q.put(("call", reset))
+                self.log(f"▶ {stage}")
+            self.log(line)
 
         def done(res, err):
+            st["running"] = False
+            self.tprog.stop()
+            self.tprog_frame.pack_forget()
             self.btn_tr.config(state="normal")
             self.btn_cancel.config(state="disabled")
             self.refresh_files(select=f)
+            if err and core.DIAR_MODEL in str(err):
+                webbrowser.open(f"https://huggingface.co/{core.DIAR_MODEL}")
             if res:
                 messagebox.showinfo("Transcripción lista", str(res))
 
-        self._bg(lambda: t.run(self.log), done)
+        tick()
+        self._bg(lambda: t.run(on_line), done)
 
     def cancel_transcribe(self) -> None:
         if self.transcription:

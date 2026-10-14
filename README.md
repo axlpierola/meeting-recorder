@@ -209,7 +209,7 @@ Solo sirve para **Identificar hablantes** (quién dijo qué). Sin token la trans
 sin separar voces. Es **gratis** (cuenta, token y modelos); todo se procesa en tu PC. Una sola vez:
 
 1. Crea una cuenta en https://huggingface.co.
-2. Acepta las condiciones (botón *Agree*) en `pyannote/speaker-diarization-3.1` y `pyannote/segmentation-3.0`.
+2. Acepta las condiciones (botón *Agree*) en `pyannote/speaker-diarization-community-1`.
 3. Crea un token *Read* en https://huggingface.co/settings/tokens y pégalo en el campo **Token HF**
    (el botón **¿Qué es?** de la app explica esto y abre la página). Pulsa **Guardar**: queda en `.hf_token`
    (ignorado por git) y el campo se bloquea; usa **Editar** para cambiarlo.

@@ -22,6 +22,7 @@ OUTPUT_DIR = Path(os.environ.get("GRABAR_DIR") or APP_DIR / "grabaciones")
 TOOLS_DIR = APP_DIR / ".tools"
 LOG_DIR = APP_DIR / "logs"
 LOG_FILE = LOG_DIR / "instalacion.log"
+TRANSCRIBE_LOG = LOG_DIR / "transcripcion.log"
 IS_WIN = os.name == "nt"
 AUDIO_EXT = (".mp3", ".wav", ".m4a", ".mp4", ".webm", ".flac", ".ogg")
 CUDA_INDEX = "https://download.pytorch.org/whl/cu128"
@@ -68,6 +69,8 @@ def prepare_env() -> dict:
     si solo tenemos el binario de imageio-ffmpeg lo exponemos como ffmpeg(.exe)."""
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
+    env.setdefault("NLTK_DATA", str(APP_DIR / ".nltk_data"))  # datos de NLTK dentro del proyecto (evita rutas de perfil)
+    env["PYTHONUNBUFFERED"] = "1"  # sin esto el log de WhisperX llega a la GUI recién al terminar
     env["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
     if shutil.which("ffmpeg") is None:
         exe = find_ffmpeg()
@@ -219,10 +222,36 @@ HF_HELP = (
     "Pasos (una sola vez):\n"
     "1. Crear cuenta en huggingface.co\n"
     "2. Aceptar las condiciones (botón 'Agree') en:\n"
-    "   huggingface.co/pyannote/speaker-diarization-3.1\n"
-    "   huggingface.co/pyannote/segmentation-3.0\n"
+    "   huggingface.co/pyannote/speaker-diarization-community-1\n"
     "3. Crear un token 'Read' en huggingface.co/settings/tokens y pegarlo acá."
 )
+
+
+DIAR_MODEL = "pyannote/speaker-diarization-community-1"
+
+
+def check_diarization_access(token: str) -> None:
+    """Falla con un mensaje claro si el token no es válido o no se aceptaron las condiciones
+    del modelo de hablantes (así no se espera minutos para descubrirlo)."""
+    try:
+        from huggingface_hub import HfApi
+        from huggingface_hub.errors import GatedRepoError, HfHubHTTPError
+    except ImportError:
+        return
+    try:
+        HfApi().auth_check(DIAR_MODEL, token=token)
+    except GatedRepoError:
+        raise RuntimeError(
+            "Falta aceptar las condiciones del modelo de hablantes en Hugging Face (gratis).\n\n"
+            f"1. Abrí https://huggingface.co/{DIAR_MODEL}\n"
+            "2. Iniciá sesión con la misma cuenta del token y pulsá 'Agree and access repository'.\n"
+            "3. Volvé acá y pulsá Transcribir otra vez.") from None
+    except HfHubHTTPError as e:
+        if getattr(e.response, "status_code", None) == 401:
+            raise RuntimeError("El token de Hugging Face no es válido o venció. Usá 'Editar' y pegá uno nuevo "
+                               "(tipo Read) desde https://huggingface.co/settings/tokens") from None
+    except Exception:
+        pass  # sin red u otro problema: que lo intente WhisperX
 
 
 def missing_required(checks: list[Check]) -> list[Check]:
@@ -648,6 +677,21 @@ class Transcription:
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
 
+    @staticmethod
+    def _explain(lines: list[str]) -> str:
+        text = "\n".join(lines[-300:])
+        known = [
+            (r"CUDA out of memory|OutOfMemory", "La GPU se quedó sin memoria: probá el modelo 'medium' o 'small', o cómputo 'cpu'."),
+            (r"GatedRepoError|gated|401|403", "Hugging Face rechazó el acceso: revisá el token y que hayas aceptado las condiciones del modelo (botón '¿Qué es?')."),
+            (r"cublas|cudnn|CUDA.*not available|no CUDA", "Problema con CUDA: pulsá 'Instalar WhisperX' para reinstalar PyTorch con GPU, o usá cómputo 'cpu'."),
+            (r"No space left|Errno 28", "Sin espacio en disco."),
+            (r"Read timed out|ConnectionError|Max retries", "Se cortó la descarga de un modelo: revisá tu internet y reintentá (retoma lo descargado)."),
+        ]
+        for pat, msg in known:
+            if re.search(pat, text, re.I):
+                return "Causa probable: " + msg
+        return "Causa no reconocida: mirá las últimas líneas del log."
+
     def run(self, log: Log = print) -> Optional[Path]:
         if not _has_module("whisperx"):
             raise RuntimeError("WhisperX no está instalado")
@@ -655,6 +699,8 @@ class Transcription:
             log("Falta el token de Hugging Face (gratis, botón '¿Qué es?').")
             log("Sin token de Hugging Face: se desactiva la identificación de hablantes.")
             self.diarize = False
+        if self.diarize:
+            check_diarization_access(self.hf_token)
         compute = "float16" if self.device == "cuda" else "int8"
         cmd = [PYTHON, "-m", "whisperx", str(self.audio), "--model", self.model,
                "--language", self.language, "--device", self.device, "--compute_type", compute,
@@ -668,17 +714,24 @@ class Transcription:
                                       text=True, encoding="utf-8", errors="replace",
                                       env=prepare_env(), creationflags=_no_window())
         assert self._proc.stdout
+        LOG_DIR.mkdir(exist_ok=True)
+        lf = open(TRANSCRIBE_LOG, "w", encoding="utf-8")
+        tail: list[str] = []
         for line in self._proc.stdout:
             line = line.rstrip()
             if self.hf_token:
                 line = line.replace(self.hf_token, "hf_***")
             log(line)
+            tail.append(line)
+            lf.write(line + "\n")
+        lf.close()
         rc = self._proc.wait()
         if self._cancelled:
             log("Transcripción cancelada.")
             return None
         if rc != 0:
-            raise RuntimeError(f"WhisperX terminó con código {rc}")
+            raise RuntimeError(f"WhisperX terminó con código {rc}.\n\n{self._explain(tail)}\n\n"
+                               f"Detalle completo en {TRANSCRIBE_LOG}")
         json_file = self.audio.with_suffix(".json")
         md_file = self.audio.with_suffix(".md")
         if not json_file.exists():
@@ -696,3 +749,33 @@ def open_folder(path: Path) -> None:
         subprocess.Popen(["open", str(path)])
     else:
         subprocess.Popen(["xdg-open", str(path)])
+
+
+# --------------------------------------------------------------------------
+# Progreso de la transcripción (barras tqdm de WhisperX / Hugging Face)
+# --------------------------------------------------------------------------
+_TQDM = re.compile(r"^\s*(?P<label>[^|%]*?):?\s*(?P<pct>\d{1,3})%\|[^|]*\|\s*(?P<cur>[\d.]+\s?\w*)/(?P<tot>[\d.]+\s?\w*)")
+_STAGES = [
+    (r"Performing transcription", "Transcribiendo el audio"),
+    (r"Performing alignment", "Alineando palabras"),
+    (r"Performing diarization|diariz", "Identificando hablantes"),
+    (r"Detected language|Lightning automatically upgraded", "Cargando modelos"),
+]
+
+
+def parse_progress(line: str) -> Optional[tuple[str, int, str]]:
+    """Devuelve (etiqueta, porcentaje, 'actual/total') si la línea es una barra tqdm."""
+    m = _TQDM.match(line)
+    if not m:
+        return None
+    return m["label"].strip(), min(int(m["pct"]), 100), f"{m['cur'].strip()}/{m['tot'].strip()}"
+
+
+def stage_of(line: str) -> Optional[str]:
+    m = re.match(r'Downloading: "[^"]*/([^/"]+)"', line)
+    if m:
+        return f"Descargando modelo: {m[1]} (solo la primera vez)"
+    for pat, label in _STAGES:
+        if re.search(pat, line, re.I):
+            return label
+    return None
