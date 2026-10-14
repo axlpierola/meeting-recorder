@@ -473,9 +473,9 @@ class App(tk.Tk):
             self.key_var.set("")
             self.key_entry.config(state="disabled")
             self.btn_key.config(state="disabled", text="Guardar")
-            self.btn_getkey.config(text="Instalar Ollama", state="normal")
-            self.sum_hint.config(text="100% local y gratis: nada sale de tu PC. Ollama debe estar instalado; "
-                                      "el modelo (~5 GB) se descarga la primera vez con barra de progreso.")
+            self.btn_getkey.config(text="Instalar Ollama + modelo", state="normal")
+            self.sum_hint.config(text="100% local y gratis: nada sale de tu PC. Con 'Instalar Ollama + modelo' la app "
+                                      "descarga e instala Ollama (~1.6 GB) y el modelo (~5 GB) sola, con barra de progreso.")
         if p["needs_key"]:
             self.btn_getkey.config(text="Obtener key")
 
@@ -494,12 +494,15 @@ class App(tk.Tk):
             self.log("API key guardada." if self.key_var.get() else "API key borrada.")
 
     def open_key_page(self) -> None:
-        webbrowser.open(self._prov()["key_url"])
+        if self._prov()["id"] == "ollama":
+            self.start_summary(setup_only=True)
+        else:
+            webbrowser.open(self._prov()["key_url"])
 
-    def start_summary(self) -> None:
+    def start_summary(self, setup_only: bool = False) -> None:
         f = self._selected()
         md = f.with_suffix(".md") if f else None
-        if not md or not md.exists():
+        if not setup_only and (not md or not md.exists()):
             messagebox.showinfo("Resumen", "Primero transcribí la grabación seleccionada (hace falta el .md).")
             return
         p = self._prov()
@@ -513,10 +516,16 @@ class App(tk.Tk):
                     "¿Continuar? (Para que no salga de tu PC usá Ollama.)"):
                 return
             self._sent_ok.add(pid)
-        elif (installed := resumen.ollama_models()) is not None and not any(
-                m == model or m == f"{model}:latest" for m in installed):
-            if not messagebox.askyesno("Descargar modelo", f"El modelo '{model}' no está en Ollama.\n\n"
-                                       "¿Descargarlo ahora? (~5 GB, solo la primera vez)"):
+        else:
+            installed = resumen.ollama_models()
+            todo = []
+            if installed is None and not resumen.ollama_installed():
+                todo.append("instalar Ollama (~1.6 GB)")
+            if installed is None or not any(m == model or m == f"{model}:latest" for m in installed):
+                todo.append(f"descargar el modelo '{model}' (~5 GB)")
+            if todo and not messagebox.askyesno(
+                    "Preparar Ollama", "Primero hay que " + " y ".join(todo) + ", solo la primera vez y sin que "
+                    "hagas nada manual (puede tardar según tu internet).\n\n¿Continuar?"):
                 return
         self.btn_sum.config(state="disabled")
         t0 = time.monotonic()
@@ -539,16 +548,18 @@ class App(tk.Tk):
                         self.sprog.stop()
                         self.sprog.config(mode="determinate", maximum=100)
                     self.sprog.config(value=pct)
-                    st["text"] = f"Descargando modelo {model}: {pct}% ({detail})"
+                    st["text"] = f"{status or 'Descargando'}: {pct}% ({detail})"
                 else:
-                    st["text"] = f"Ollama: {status}"
+                    st["text"] = status or "Ollama ..."
+                    self.sprog.config(mode="indeterminate")
+                    self.sprog.start(12)
             self.q.put(("call", upd))
 
         def work():
             if pid == "ollama":
-                models = resumen.ensure_ollama(self.log)
-                if not any(m == model or m == f"{model}:latest" for m in models):
-                    resumen.pull_model(model, on_pull, self.log)
+                resumen.setup_ollama(model, on_pull, self.log)
+                if setup_only:
+                    return None
                 def to_indet() -> None:
                     self.sprog.config(mode="indeterminate")
                     self.sprog.start(12)
@@ -563,8 +574,9 @@ class App(tk.Tk):
             self.sprog_label.pack_forget()
             self.btn_sum.config(state="normal")
             self.refresh_files(select=f)
-            if err and "ollama.com/download" in str(err):
-                webbrowser.open("https://ollama.com/download")
+            if setup_only and not err:
+                self.log("✔ Ollama y el modelo están listos. Ya puedes pulsar Resumen.")
+                messagebox.showinfo("Ollama", "Ollama y el modelo están listos.")
             if out:
                 self.log(f"✔ Resumen guardado: {out}")
                 os.startfile(str(out)) if core.IS_WIN else core.open_folder(out.parent)

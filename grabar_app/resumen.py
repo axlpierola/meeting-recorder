@@ -142,6 +142,75 @@ def ensure_ollama(log: Log) -> list[str]:
     raise SummaryError("Ollama está instalado pero no arrancó. Ábrelo desde el menú Inicio y reintenta.")
 
 
+OLLAMA_SETUP_URL = "https://ollama.com/download/OllamaSetup.exe"
+
+
+def ollama_installed() -> bool:
+    return _ollama_exe() is not None
+
+
+def install_ollama(progress: Callable[[str, int, str], None], log: Log) -> None:
+    """Descarga OllamaSetup.exe (~1.6 GB, se retoma si se corta) y lo instala en silencio.
+    Es una instalación por usuario: no pide permisos de administrador."""
+    if not core.IS_WIN:
+        raise SummaryError("La instalación automática de Ollama solo está disponible en Windows. "
+                           "En macOS/Linux: https://ollama.com/download")
+    if ollama_installed():
+        return
+    dest_dir = core.APP_DIR / ".tools" / "ollama"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    setup = dest_dir / "OllamaSetup.exe"
+    part = dest_dir / "OllamaSetup.exe.part"
+    log("Descargando el instalador de Ollama (~1.6 GB, solo una vez; si se corta se retoma) ...")
+    for attempt in range(1, 6):
+        have = part.stat().st_size if part.exists() else 0
+        headers = {"User-Agent": "Mozilla/5.0"}
+        if have:
+            headers["Range"] = f"bytes={have}-"
+        try:
+            with urllib.request.urlopen(urllib.request.Request(OLLAMA_SETUP_URL, headers=headers), timeout=60) as r:
+                resumed = r.status == 206
+                total = int(r.headers.get("Content-Length", 0)) + (have if resumed else 0)
+                done = have if resumed else 0
+                with open(part, "ab" if resumed else "wb") as out:
+                    while True:
+                        chunk = r.read(1 << 20)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        done += len(chunk)
+                        if total:
+                            progress("Descargando Ollama", int(done * 100 / total),
+                                     f"{done / 1e6:.0f} / {total / 1e6:.0f} MB")
+            break
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+            if attempt == 5:
+                raise SummaryError(f"No se pudo descargar Ollama ({e}). Revisá tu internet y reintentá: "
+                                   "la descarga continúa donde quedó.") from None
+            log(f"Se cortó la descarga ({e}); reintentando ({attempt}/5) ...")
+            time.sleep(3)
+    if part.stat().st_size < 100_000_000 or part.read_bytes()[:2] != b"MZ":
+        part.unlink(missing_ok=True)
+        raise SummaryError("El instalador de Ollama descargado está incompleto o dañado. Reintentá.")
+    part.replace(setup)
+    progress("Instalando Ollama (puede tardar un minuto) ...", -1, "")
+    log("Instalando Ollama ...")
+    r = subprocess.run([str(setup), "/SILENT", "/NORESTART", "/SUPPRESSMSGBOXES"], timeout=900)
+    if r.returncode != 0 or not ollama_installed():
+        raise SummaryError(f"La instalación de Ollama falló (código {r.returncode}). "
+                           f"Podés ejecutarla a mano: {setup}")
+    setup.unlink(missing_ok=True)
+    log("✔ Ollama instalado.")
+
+
+def setup_ollama(model: str, progress: Callable[[str, int, str], None], log: Log) -> None:
+    """Deja Ollama listo: lo instala si falta, lo inicia y descarga el modelo si no está."""
+    install_ollama(progress, log)
+    models = ensure_ollama(log)
+    if not any(m == model or m == f"{model}:latest" for m in models):
+        pull_model(model, progress, log)
+
+
 def pull_model(model: str, progress: Callable[[str, int, str], None], log: Log) -> None:
     """Descarga un modelo de Ollama mostrando el avance (estado, %, 'X / Y MB')."""
     log(f"Descargando el modelo {model} (solo la primera vez, ~5 GB) ...")
