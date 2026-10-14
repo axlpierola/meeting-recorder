@@ -47,8 +47,9 @@ if not exist ".venv\.deps_ok" (
 
 if /i "%~1"=="cli" (
     "%VPY%" -m grabar_app cli
+    if errorlevel 1 pause
 ) else (
-    "%VPY%" -m grabar_app
+    rem GUI sin ventana de consola: pythonw + start, y esta ventana se cierra
+    start "" ".venv\Scripts\pythonw.exe" -m grabar_app
 )
-if errorlevel 1 pause
 endlocal

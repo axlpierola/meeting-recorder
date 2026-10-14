@@ -190,3 +190,25 @@ pegá el token de Hugging Face en la GUI (no se guarda) o definí `HF_TOKEN` con
 
 Notas: se graba el dispositivo de salida activo (si cambiás de auriculares, elegilo en la lista); los
 modelos de WhisperX se descargan la primera vez (varios GB para `large-v3`).
+
+### Instalación de WhisperX y solución de problemas (Windows)
+
+- `iniciar.bat` abre **solo la ventana de la app** (sin consola negra). Si la app no arranca, el error
+  se muestra en un mensaje y queda en `logs/error.log`.
+- **Instalar WhisperX** descarga ~3 GB (PyTorch con CUDA si hay GPU NVIDIA) y necesita ~8 GB libres.
+  Puede tardar 5–20 min: la app muestra una **barra de progreso** con MB descargados, tiempo transcurrido
+  y la última línea de pip. Al final verifica que WhisperX realmente arranca.
+- Si falla, aparece un mensaje con la **causa probable y cómo corregirla** (sin espacio, red/proxy, SSL,
+  permisos, Python incompatible, ruta larga). El detalle completo queda en `logs/instalacion.log`
+  (botón **Abrir carpeta de logs**). Pip reintenta hasta 10 veces ante cortes de red.
+- Si cambias de Python o algo queda corrupto: borra la carpeta `.venv` y abre `iniciar.bat` de nuevo.
+
+### Token de Hugging Face: ¿para qué y es gratis?
+
+Solo sirve para **Identificar hablantes** (quién dijo qué). Sin token la transcripción funciona igual,
+sin separar voces. Es **gratis** (cuenta, token y modelos); todo se procesa en tu PC. Una sola vez:
+
+1. Crea una cuenta en https://huggingface.co.
+2. Acepta las condiciones (botón *Agree*) en `pyannote/speaker-diarization-3.1` y `pyannote/segmentation-3.0`.
+3. Crea un token *Read* en https://huggingface.co/settings/tokens y pégalo en el campo **Token HF**
+   (el botón **¿Qué es?** de la app explica esto y abre la página).

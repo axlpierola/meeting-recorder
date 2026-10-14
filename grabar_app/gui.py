@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import queue
 import threading
+import time
+import webbrowser
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -46,6 +48,13 @@ class App(tk.Tk):
         self.btn_audio.pack(side="left", padx=6)
         self.btn_wx = ttk.Button(row, text="Instalar WhisperX", command=lambda: self._install("whisperx"))
         self.btn_wx.pack(side="left")
+        ttk.Button(row, text="Abrir carpeta de logs",
+                   command=lambda: core.open_folder(core.LOG_DIR)).pack(side="left", padx=6)
+        self.prog_frame = ttk.Frame(env)
+        self.prog_label = ttk.Label(self.prog_frame, text="", anchor="w")
+        self.prog_label.pack(fill="x")
+        self.prog = ttk.Progressbar(self.prog_frame, mode="indeterminate")
+        self.prog.pack(fill="x", pady=(2, 0))
 
         rec = ttk.LabelFrame(self, text="2. Grabar")
         rec.pack(fill="x", **pad)
@@ -109,12 +118,14 @@ class App(tk.Tk):
         self.token_var = tk.StringVar(value=os.environ.get("HF_TOKEN", ""))
         ttk.Entry(tk_row, textvariable=self.token_var, show="•").pack(side="left", fill="x", expand=True, padx=4)
         self.btn_tr = ttk.Button(tk_row, text="Transcribir", command=self.start_transcribe)
+        ttk.Button(tk_row, text="¿Qué es?", width=8, command=self.explain_token).pack(side="left", padx=(0, 4))
         self.btn_tr.pack(side="left", padx=4)
         self.btn_cancel = ttk.Button(tk_row, text="Cancelar", command=self.cancel_transcribe, state="disabled")
         self.btn_cancel.pack(side="left")
 
         self.log_box = tk.Text(tr, height=9, wrap="word", state="disabled")
         self.log_box.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.log_box.tag_config("err", foreground="#c62828")
 
     # ----------------------------------------------------------- helpers
     def log(self, msg: str) -> None:
@@ -126,7 +137,9 @@ class App(tk.Tk):
                 kind, payload = self.q.get_nowait()
                 if kind == "log":
                     self.log_box.config(state="normal")
-                    self.log_box.insert("end", payload + "\n")
+                    low = payload.lower()
+                    bad = payload.startswith(("[ERROR]", "✘")) or "error:" in low or "traceback" in low
+                    self.log_box.insert("end", payload + "\n", "err" if bad else "")
                     self.log_box.see("end")
                     self.log_box.config(state="disabled")
                 elif kind == "call":
@@ -197,18 +210,58 @@ class App(tk.Tk):
     def _install(self, what: str) -> None:
         fn = core.install_audio_deps if what == "audio" else core.install_whisperx
         self.log(f"--- Instalando {what} ---")
+        self.log(f"(Log completo en {core.LOG_FILE})")
         for b in (self.btn_audio, self.btn_wx):
             b.config(state="disabled")
+        t0 = time.monotonic()
+        state = {"running": True, "msg": "Preparando ...", "mb": ""}
+        self.prog_frame.pack(fill="x", padx=6, pady=(0, 6))
+        self.prog.config(mode="indeterminate", value=0)
+        self.prog.start(12)
+
+        def tick() -> None:
+            if not state["running"]:
+                return
+            m, s = divmod(int(time.monotonic() - t0), 60)
+            extra = f" · {state['mb']}" if state["mb"] else ""
+            self.prog_label.config(text=f"Instalando {what}… {m:02d}:{s:02d}{extra}  |  {state['msg']}")
+            self.after(500, tick)
+
+        def on_line(line: str) -> None:
+            if line.strip():
+                state["msg"] = line.strip()[:80]
+            self.log(line)
+
+        def on_progress(cur: int, total: int) -> None:
+            def upd() -> None:
+                if total > 0:
+                    if str(self.prog.cget("mode")) != "determinate":
+                        self.prog.stop()
+                        self.prog.config(mode="determinate", maximum=100)
+                    self.prog.config(value=cur * 100 / total)
+                    state["mb"] = f"descarga {cur / 1e6:.0f} / {total / 1e6:.0f} MB"
+            self.q.put(("call", upd))
 
         def done(ok, err):
+            state["running"] = False
+            self.prog.stop()
+            self.prog_frame.pack_forget()
             for b in (self.btn_audio, self.btn_wx):
                 b.config(state="normal")
-            self.log("Instalación terminada." if ok else "La instalación falló, revisá el log.")
-            if what == "audio" and ok:
-                messagebox.showinfo("Reiniciar", "Cerrá y volvé a abrir la aplicación para usar los componentes nuevos.")
+            if ok:
+                self.log("✔ Instalación terminada correctamente.")
+                if what == "audio":
+                    messagebox.showinfo("Reiniciar", "Cerrá y volvé a abrir la aplicación para usar los componentes nuevos.")
+            else:
+                self.log("✘ La instalación falló: causa y solución en el mensaje de error.")
             self.refresh_env()
 
-        self._bg(lambda: fn(self.log), done)
+        tick()
+        self._bg(lambda: fn(on_line, on_progress), done)
+
+    def explain_token(self) -> None:
+        if messagebox.askyesno("Token de Hugging Face", core.HF_HELP + "\n\n¿Abrir la página para crear el token?"):
+            webbrowser.open("https://huggingface.co/settings/tokens")
 
     # ---------------------------------------------------------- grabar
     def _index_for(self, name: str, items: list[dict]) -> int | None:

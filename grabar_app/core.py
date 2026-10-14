@@ -20,11 +20,17 @@ from typing import Callable, Optional
 APP_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = Path(os.environ.get("GRABAR_DIR") or APP_DIR / "grabaciones")
 TOOLS_DIR = APP_DIR / ".tools"
+LOG_DIR = APP_DIR / "logs"
+LOG_FILE = LOG_DIR / "instalacion.log"
 IS_WIN = os.name == "nt"
 AUDIO_EXT = (".mp3", ".wav", ".m4a", ".mp4", ".webm", ".flac", ".ogg")
 CUDA_INDEX = "https://download.pytorch.org/whl/cu128"
 
 Log = Callable[[str], None]
+
+# La GUI corre con pythonw.exe (sin consola); los subprocesos usan python.exe
+_exe = Path(sys.executable)
+PYTHON = str(_exe.with_name("python.exe")) if _exe.name.lower() == "pythonw.exe" else sys.executable
 
 
 # --------------------------------------------------------------------------
@@ -101,7 +107,7 @@ def cuda_available() -> bool:
             return False  # no cachear: puede instalarse luego
         try:
             out = subprocess.run(
-                [sys.executable, "-c", "import torch;print(torch.cuda.is_available())"],
+                [PYTHON, "-c", "import torch;print(torch.cuda.is_available())"],
                 capture_output=True, text=True, timeout=120, creationflags=_no_window(),
             )
             _cuda_cache = out.stdout.strip() == "True"
@@ -199,9 +205,24 @@ def check_environment() -> list[Check]:
     tok = bool(os.environ.get("HF_TOKEN"))
     checks.append(Check("hf", "Token Hugging Face (hablantes)", tok,
                         "definido" if tok else "no definido: solo hace falta para identificar hablantes",
-                        'En PowerShell: setx HF_TOKEN "hf_xxx" y reabrí la app (o pegalo en la GUI)',
+                        "Opcional y gratis. Pegalo en el campo 'Token HF' (botón '¿Qué es?' explica cómo obtenerlo)",
                         required=False))
     return checks
+
+
+HF_HELP = (
+    "¿Para qué sirve?\n"
+    "Solo para 'Identificar hablantes' (saber quién dijo qué). Sin token la transcripción funciona "
+    "igual, pero sin separar voces. El modelo que distingue voces (pyannote) está alojado en "
+    "Hugging Face y exige una cuenta.\n\n"
+    "¿Es gratis? Sí: cuenta, token (tipo 'Read') y modelos son gratuitos; todo se procesa en tu PC.\n\n"
+    "Pasos (una sola vez):\n"
+    "1. Crear cuenta en huggingface.co\n"
+    "2. Aceptar las condiciones (botón 'Agree') en:\n"
+    "   huggingface.co/pyannote/speaker-diarization-3.1\n"
+    "   huggingface.co/pyannote/segmentation-3.0\n"
+    "3. Crear un token 'Read' en huggingface.co/settings/tokens y pegarlo acá."
+)
 
 
 def missing_required(checks: list[Check]) -> list[Check]:
@@ -211,34 +232,131 @@ def missing_required(checks: list[Check]) -> list[Check]:
 # --------------------------------------------------------------------------
 # Instalación de dependencias (pip, sin permisos de administrador)
 # --------------------------------------------------------------------------
-def _run_stream(cmd: list[str], log: Log, env: Optional[dict] = None) -> int:
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                            encoding="utf-8", errors="replace", env=env or prepare_env(),
-                            creationflags=_no_window())
-    assert proc.stdout
-    for line in proc.stdout:
-        log(line.rstrip())
-    return proc.wait()
+class InstallError(RuntimeError):
+    """Fallo de instalación con causa probable y pasos para corregirlo."""
 
 
-def install_audio_deps(log: Log) -> bool:
+# (patrón en la salida de pip, causa probable + qué hacer)
+_DIAGNOSES = [
+    (r"No space left|Errno 28|not enough space",
+     "Sin espacio en disco. WhisperX + PyTorch necesitan ~8 GB libres durante la instalación. "
+     "Liberá espacio en esta unidad y reintentá."),
+    (r"Read timed out|ConnectionError|Connection aborted|Max retries exceeded|"
+     r"Temporary failure in name resolution|getaddrinfo failed|Network is unreachable",
+     "Problema de red: se cortó la descarga. Revisá tu internet (¿VPN/proxy/firewall corporativo?) "
+     "y reintentá; pip retoma lo ya descargado."),
+    (r"SSLError|CERTIFICATE_VERIFY_FAILED",
+     "Error SSL/certificados, típico de proxys corporativos que inspeccionan HTTPS. "
+     "Probá en otra red o pedí a TI que permita pypi.org, files.pythonhosted.org y download.pytorch.org."),
+    (r"WinError 5|PermissionError|Access is denied|Acceso denegado|WinError 32",
+     "Permisos o archivo en uso. Cerrá otras ventanas de la app/Python, pausá el antivirus un momento "
+     "y reintentá. La app no necesita ser administrador."),
+    (r"Microsoft Visual C\+\+|Failed building wheel|error: subprocess-exited-with-error|"
+     r"Could not build wheels",
+     "pip intentó compilar un paquete (no hay versión precompilada para tu Python). "
+     "Usá Python 3.12 de 64 bits (winget install Python.Python.3.12), borrá la carpeta .venv y volvé a abrir."),
+    (r"No matching distribution found|Could not find a version that satisfies",
+     "pip no encontró una versión compatible. Suele pasar con Python muy nuevo (3.13+) o de 32 bits. "
+     "Usá Python 3.12 de 64 bits, borrá la carpeta .venv y volvé a abrir."),
+    (r"MemoryError",
+     "Memoria insuficiente al instalar. Cerrá otras aplicaciones y reintentá."),
+    (r"Long Path|path too long|FileNotFoundError.*\\",
+     "Ruta demasiado larga en Windows. Mové el proyecto a una carpeta corta (p. ej. C:\\grabador)."),
+]
+
+
+def diagnose(lines: list[str]) -> str:
+    text = "\n".join(lines[-400:])
+    for pattern, msg in _DIAGNOSES:
+        if re.search(pattern, text, re.I):
+            return msg
+    return "Causa no reconocida. Mirá las últimas líneas del log (arriba) y el archivo de log completo."
+
+
+def _run_stream(cmd: list[str], log: Log, env: Optional[dict] = None,
+                progress: Optional[Callable[[int, int], None]] = None) -> tuple[int, list[str]]:
+    """Ejecuta cmd mostrando la salida en vivo y guardándola en logs/instalacion.log.
+    Las líneas 'Progress X of Y' de pip (--progress-bar raw) alimentan `progress`."""
+    LOG_DIR.mkdir(exist_ok=True)
+    env = dict(env or prepare_env())
+    env["PYTHONUNBUFFERED"] = "1"
+    lines: list[str] = []
+    with open(LOG_FILE, "a", encoding="utf-8") as lf:
+        lf.write(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S} :: {' '.join(cmd)}\n")
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                encoding="utf-8", errors="replace", env=env,
+                                creationflags=_no_window())
+        assert proc.stdout
+        for raw in proc.stdout:
+            line = raw.rstrip()
+            m = re.match(r"Progress (\d+) of (\d+)", line)
+            if m:
+                if progress:
+                    progress(int(m[1]), int(m[2]))
+                continue
+            lines.append(line)
+            lf.write(line + "\n")
+            log(line)
+        rc = proc.wait()
+        lf.write(f"===== código de salida: {rc}\n")
+    return rc, lines
+
+
+_PIP = ["-m", "pip", "install", "--no-input", "--progress-bar", "raw",
+        "--retries", "10", "--timeout", "60"]
+
+
+def _pip(args: list[str], log: Log, progress=None) -> tuple[int, list[str]]:
+    return _run_stream([PYTHON, *_PIP, *args], log, progress=progress)
+
+
+def _fail(what: str, lines: list[str], rc: int) -> InstallError:
+    return InstallError(f"{what} falló (código {rc}).\n\nCausa probable: {diagnose(lines)}\n\n"
+                        f"Log completo: {LOG_FILE}")
+
+
+def install_audio_deps(log: Log, progress=None) -> bool:
     pkgs = ["imageio-ffmpeg"] + (["PyAudioWPatch"] if IS_WIN else [])
     log(f"Instalando {', '.join(pkgs)} ...")
-    return _run_stream([sys.executable, "-m", "pip", "install", "--upgrade", *pkgs], log) == 0
+    rc, lines = _pip(["--upgrade", *pkgs], log, progress)
+    if rc != 0:
+        raise _fail("La instalación de audio/ffmpeg", lines, rc)
+    return True
 
 
-def install_whisperx(log: Log) -> bool:
+def _free_gb(path: Path) -> float:
+    return shutil.disk_usage(path).free / 1024 ** 3
+
+
+def install_whisperx(log: Log, progress=None) -> bool:
     """Si hay GPU NVIDIA instala primero PyTorch con CUDA; luego WhisperX."""
     global _cuda_cache
     _cuda_cache = None
+    free = _free_gb(APP_DIR)
+    log(f"Espacio libre en la unidad: {free:.1f} GB (se necesitan ~8 GB).")
+    if free < 8:
+        raise InstallError(f"Solo hay {free:.1f} GB libres; hacen falta ~8 GB. Liberá espacio y reintentá.")
+    log("Paso 1/3: PyTorch (descarga de ~2.7 GB con GPU, puede tardar 5-20 min según tu internet) ...")
     if nvidia_gpu():
         log("GPU NVIDIA detectada: instalando PyTorch con CUDA ...")
-        rc = _run_stream([sys.executable, "-m", "pip", "install", "torch", "torchaudio",
-                          "--index-url", CUDA_INDEX], log)
+        rc, _ = _pip(["torch", "torchaudio", "--index-url", CUDA_INDEX], log, progress)
         if rc != 0:
             log("No se pudo instalar PyTorch con CUDA; se continuará con la versión por defecto (CPU).")
-    log("Instalando WhisperX (puede tardar varios minutos) ...")
-    return _run_stream([sys.executable, "-m", "pip", "install", "--upgrade", "whisperx"], log) == 0
+    log("Paso 2/3: WhisperX y sus dependencias ...")
+    rc, lines = _pip(["--upgrade", "whisperx"], log, progress)
+    if rc != 0:
+        raise _fail("La instalación de WhisperX", lines, rc)
+    log("Paso 3/3: verificando que WhisperX arranca ...")
+    r = subprocess.run([PYTHON, "-c", "import whisperx"], capture_output=True, text=True,
+                       env=prepare_env(), creationflags=_no_window())
+    if r.returncode != 0:
+        tail = r.stderr.strip().splitlines()
+        for ln in tail[-15:]:
+            log(ln)
+        raise InstallError("WhisperX se instaló pero falla al importarse:\n" + "\n".join(tail[-3:])
+                           + f"\n\nPosible causa: {diagnose(tail)}\n"
+                           "Si menciona 'DLL', instalá 'Microsoft Visual C++ Redistributable 2015-2022 x64'.")
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -496,10 +614,11 @@ class Transcription:
         if not _has_module("whisperx"):
             raise RuntimeError("WhisperX no está instalado")
         if self.diarize and not self.hf_token:
+            log("Falta el token de Hugging Face (gratis, botón '¿Qué es?').")
             log("Sin token de Hugging Face: se desactiva la identificación de hablantes.")
             self.diarize = False
         compute = "float16" if self.device == "cuda" else "int8"
-        cmd = [sys.executable, "-m", "whisperx", str(self.audio), "--model", self.model,
+        cmd = [PYTHON, "-m", "whisperx", str(self.audio), "--model", self.model,
                "--language", self.language, "--device", self.device, "--compute_type", compute,
                "--output_dir", str(self.audio.parent), "--output_format", "json",
                "--vad_onset", "0.500"]
