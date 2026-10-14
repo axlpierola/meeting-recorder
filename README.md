@@ -17,8 +17,8 @@ Funciona en **macOS** (Apple Silicon o Intel) y **Linux** (Ubuntu con PipeWire/P
 ## Instalación rápida
 
 ```bash
-git clone https://github.com/luber2000/my-notes.git   # o git@github.com:luber2000/my-notes.git
-cd my-notes
+git clone https://github.com/axlpierola/meeting-recorder.git   # o git@github.com:axlpierola/meeting-recorder.git
+cd meeting-recorder
 ./install.sh
 ```
 
