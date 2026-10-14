@@ -203,6 +203,18 @@ modelos de WhisperX se descargan la primera vez (varios GB para `large-v3`).
   (botón **Abrir carpeta de logs**). Pip reintenta hasta 10 veces ante cortes de red.
 - Si cambias de Python o algo queda corrupto: borra la carpeta `.venv` y abre `iniciar.bat` de nuevo.
 
+### Interfaz y preferencias (Windows)
+
+- Interfaz moderna con [ttkbootstrap](https://github.com/israel-dryer/ttkbootstrap): **modo claro/oscuro** (interruptor
+  arriba a la derecha), estado del entorno en chips (pasa el mouse para ver el detalle), lista de grabaciones por fecha
+  a la izquierda, pestañas **Grabar / Transcribir / Resumen** y, siempre al final, el panel **Actividad**
+  (progreso + registro de acciones, que puedes ocultar).
+- Tus últimas preferencias (tema, pestaña, nombre, dispositivos de audio, modelo, idioma, cómputo, hablantes,
+  proveedor/modelo/idioma del resumen) se recuerdan en `config.json` (ignorado por git). El token y las API keys
+  se guardan aparte, como se explica abajo.
+- **Idioma del resumen:** selector en la pestaña Resumen (por defecto Español); el informe y sus títulos salen
+  en ese idioma aunque la reunión esté en otro.
+
 ### Carpetas, resumen y proveedores (Windows)
 
 - Las grabaciones, transcripciones y resúmenes se guardan en `grabaciones/AAAA/MM/DD/`

@@ -33,7 +33,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 set "VPY=.venv\Scripts\python.exe"
-if not exist ".venv\.deps_ok" (
+if not exist ".venv\.deps_ok2" (
     echo [INFO] Instalando dependencias basicas ^(audio + ffmpeg^) ...
     "%VPY%" -m pip install --upgrade pip
     "%VPY%" -m pip install -r requirements.txt
@@ -42,7 +42,7 @@ if not exist ".venv\.deps_ok" (
         pause
         exit /b 1
     )
-    echo ok> ".venv\.deps_ok"
+    echo ok> ".venv\.deps_ok2"
 )
 
 if /i "%~1"=="cli" (

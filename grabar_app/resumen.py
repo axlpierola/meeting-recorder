@@ -275,26 +275,28 @@ def _ask_openai(model: str, key: str, prompt: str) -> str:
 # --------------------------------------------------------------------------
 # Resumen
 # --------------------------------------------------------------------------
-def build_prompt(transcript_md: Path) -> str:
+def build_prompt(transcript_md: Path, language: str = "Español") -> str:
     if not PROMPT_FILE.exists():
         raise SummaryError(f"Falta el archivo del prompt: {PROMPT_FILE}")
     text = transcript_md.read_text(encoding="utf-8")
     text = text.replace("# Transcripción de Audio", "").strip()
-    return PROMPT_FILE.read_text(encoding="utf-8").replace("{{TRANSCRIPCION}}", text)
+    prompt = PROMPT_FILE.read_text(encoding="utf-8")
+    return prompt.replace("{{IDIOMA}}", language).replace("{{TRANSCRIPCION}}", text)
 
 
 def summary_path(transcript_md: Path) -> Path:
     return transcript_md.with_suffix(".resumen.md")
 
 
-def summarize(transcript_md: Path, provider_id: str, model: str, key: str, log: Log = print) -> Path:
+def summarize(transcript_md: Path, provider_id: str, model: str, key: str, log: Log = print,
+              language: str = "Español") -> Path:
     model = model.strip()
     if not model:
         raise SummaryError("Indicá el modelo a usar.")
     if provider_id != "ollama" and not key:
         raise SummaryError("Falta la API key de este proveedor (campo 'API key').")
-    prompt = build_prompt(transcript_md)
-    log(f"Generando resumen con {provider_id}/{model} ...")
+    prompt = build_prompt(transcript_md, language)
+    log(f"Generando resumen en {language} con {provider_id}/{model} ...")
     if provider_id == "ollama":
         text = _ask_ollama(model, prompt)
     elif provider_id == "claude":

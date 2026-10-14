@@ -21,3 +21,4 @@ logs/
 .hf_token
 .nltk_data/
 .api_keys.json
+config.json

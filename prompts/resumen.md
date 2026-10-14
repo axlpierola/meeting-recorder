@@ -3,7 +3,8 @@ automática de una reunión (puede tener errores de reconocimiento y los hablant
 SPEAKER_01, etc.). Genera un informe claro y accionable.
 
 ## Reglas
-- Escribe en el mismo idioma de la transcripción (español salvo que sea otro).
+- Escribe TODO el informe en **{{IDIOMA}}** (incluidos los títulos de las secciones, que debes traducir a ese
+  idioma), aunque la transcripción esté en otro idioma.
 - Usa SOLO información presente en la transcripción. No inventes nombres, fechas, cifras ni compromisos.
   Si algo no está claro, escribe "No especificado".
 - Corrige mentalmente errores evidentes de transcripción (nombres propios, siglas) solo si el contexto lo deja claro.
