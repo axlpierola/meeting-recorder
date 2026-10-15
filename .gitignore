@@ -11,3 +11,14 @@ grabaciones/*
 # Secretos y entorno
 .env
 *.env
+
+# Versión Python/Windows
+.venv/
+.tools/
+__pycache__/
+*.pyc
+logs/
+.hf_token
+.nltk_data/
+.api_keys.json
+config.json
