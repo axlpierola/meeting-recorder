@@ -1,16 +1,22 @@
-# 🎙️ Meeting Recorder — edición **Windows**
+# 🎙️ Meeting Recorder
+
+Graba tus reuniones (audio del sistema + micrófono), las transcribe con IA y, opcionalmente, identifica
+quién habla y genera un resumen con action items. Pensado para reuniones de Slack, Meet, Zoom o Teams.
 
 > [!IMPORTANT]
-> **Esta rama es exclusiva para Windows 10/11.** Es una aplicación de escritorio en Python, con interfaz gráfica
-> moderna, que **graba tus reuniones, las transcribe con IA y genera el resumen con action items**, todo desde una sola
-> ventana y sin instalar drivers de audio ni ser administrador.
-> Los scripts para macOS/Linux (`grabar.sh`, `install.sh`, `mp4towav.sh`) siguen en el repositorio, pero **no son el
-> foco de esta rama** (están en la rama `main`).
+> **Hay dos formas de usarlo según tu sistema:**
+>
+> | Sistema | Cómo | Qué es |
+> |---|---|---|
+> | **macOS / Linux** | Scripts de terminal: `grabar.sh`, `install.sh`, `mp4towav.sh` | Menú de terminal con BlackHole (macOS) o PulseAudio/PipeWire (Linux). Ver la sección **macOS / Linux** más abajo. |
+> | **Windows 10/11** | App de escritorio en Python con interfaz gráfica: `iniciar.bat` | Graba, transcribe y resume con IA desde una ventana, sin drivers de audio ni permisos de administrador. El resto de este README cubre esta versión. |
 
 <p align="center">
-  <img src="docs/img/app-claro.png" alt="Interfaz en modo claro" width="49%">
-  <img src="docs/img/app-oscuro.png" alt="Interfaz en modo oscuro" width="49%">
+  <img src="docs/img/app-claro.png" alt="Interfaz en modo claro (Windows)" width="49%">
+  <img src="docs/img/app-oscuro.png" alt="Interfaz en modo oscuro (Windows)" width="49%">
 </p>
+
+## Windows
 
 ## Qué puedes hacer
 
@@ -39,8 +45,8 @@
 # 1) Python (una sola vez; marca "Add to PATH" si usas el instalador gráfico)
 winget install Python.Python.3.12
 
-# 2) Descarga esta rama
-git clone -b windows https://github.com/axlpierola/meeting-recorder.git E:\meeting-recording
+# 2) Descarga el repositorio
+git clone https://github.com/axlpierola/meeting-recorder.git E:\meeting-recording
 
 # 3) Abre la aplicación
 E:\meeting-recording\iniciar.bat
@@ -187,3 +193,26 @@ La app muestra la causa probable en el mensaje de error; el detalle completo est
 - Python + `tkinter`/[`ttkbootstrap`](https://github.com/israel-dryer/ttkbootstrap) 1.10.1; captura con `PyAudioWPatch` (WASAPI loopback); `imageio-ffmpeg`.
 - `grabar_app/core.py` (entorno, grabación, transcripción) · `library.py` (renombrar/borrar/datos) · `resumen.py` (Ollama y APIs, solo `urllib`) · `settings.py` (preferencias) · `gui.py` / `cli.py`.
 - Las llamadas a las APIs usan únicamente la librería estándar: no hay SDKs que instalar.
+
+## macOS / Linux
+
+En macOS y Linux la herramienta son **scripts de terminal**, no la app gráfica (esa es solo para Windows).
+
+```bash
+git clone https://github.com/axlpierola/meeting-recorder.git
+cd meeting-recorder
+./install.sh
+```
+
+`install.sh` detecta tu sistema e instala lo necesario (ffmpeg, WhisperX vía pipx y, en macOS, BlackHole 2ch)
+y crea los comandos globales `grabar` y `mp4towav`. Después:
+
+```bash
+grabar                      # menú: grabar, parar, transcribir, listar
+mp4towav ~/Downloads/reunion.mp4   # convierte un video/audio ya grabado para transcribirlo
+```
+
+- **macOS** usa BlackHole + `avfoundation` para capturar el audio del sistema (hay que configurar un dispositivo
+  de salida múltiple una sola vez; `install.sh` te muestra los pasos).
+- **Linux** usa el `.monitor` de PulseAudio/PipeWire, sin configuración extra.
+- La transcripción con WhisperX y el token de Hugging Face funcionan igual que en la versión Windows (ver arriba).
