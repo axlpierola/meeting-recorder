@@ -6,6 +6,7 @@ import queue
 import re
 import threading
 import time
+import unicodedata
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -138,6 +139,21 @@ class App(ttk.Window):
         self.style.configure("Treeview", rowheight=30)
         left = ttk.Labelframe(body, text=" Reuniones ", padding=12)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        search = ttk.Frame(left)
+        search.pack(fill="x", pady=(0, 10))
+        search.columnconfigure(0, weight=1)
+        self.filter_var = tk.StringVar()
+        self.filter_entry = ttk.Entry(search, textvariable=self.filter_var)
+        self.filter_entry.grid(row=0, column=0, sticky="ew")
+        self.btn_clear = ttk.Button(search, text="✕", width=3, bootstyle="primary-outline", command=self.clear_filter)
+        self.btn_clear.grid(row=0, column=1, padx=(6, 0))
+        self.filter_count = ttk.Label(search, text="", bootstyle="secondary")
+        self.filter_count.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self._filter_job = None
+        self.filter_var.trace_add("write", lambda *_: self._filter_changed())
+        self.filter_entry.bind("<Escape>", lambda _e: self.clear_filter())
+        self.bind_all("<Control-f>", lambda _e: (self.filter_entry.focus_set(), self.filter_entry.select_range(0, "end")))
+        ToolTip(self.filter_entry, text="Buscar por nombre de reunión o cliente (Ctrl+F). Escape limpia.", bootstyle="secondary")
         wrap = ttk.Frame(left)
         wrap.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(wrap, columns=("cli", "t", "r"), height=5, selectmode="browse")
@@ -577,11 +593,33 @@ class App(ttk.Window):
     # ------------------------------------------------------ grabaciones
     _NAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_(\d{2})-(\d{2})-\d{2}_?(.*)$")
 
+    @staticmethod
+    def _norm(text: str) -> str:
+        """Minúsculas y sin tildes, para buscar 'reunion' y encontrar 'Reunión'."""
+        return unicodedata.normalize("NFKD", text.lower()).encode("ascii", "ignore").decode()
+
+    def _filter_changed(self) -> None:
+        if self._filter_job:
+            self.after_cancel(self._filter_job)
+        self._filter_job = self.after(150, lambda: self.refresh_files(select=self._selected()))
+
+    def clear_filter(self) -> None:
+        self.filter_var.set("")
+
+    def _matches(self, f: Path, meta: dict, words: list[str]) -> bool:
+        hay = self._norm(f"{library.display_name(f)} {f.stem} {meta['cliente']}")
+        return all(w in hay for w in words)
+
     def refresh_files(self, select: Path | None = None) -> None:
         self.files = core.list_recordings()
         self.tree.delete(*self.tree.get_children())
-        target = None
+        words = self._norm(self.filter_var.get()).split()
+        visible: list[int] = []
         for i, f in enumerate(self.files):
+            meta = library.load_meta(f)
+            if words and not self._matches(f, meta, words):
+                continue
+            visible.append(i)
             try:
                 rel = f.parent.relative_to(core.OUTPUT_DIR).as_posix()
             except ValueError:
@@ -594,10 +632,15 @@ class App(ttk.Window):
             label = f"{m[1]}:{m[2]}   {name}" if m else f.name
             md = f.with_suffix(".md")
             self.tree.insert(parent, "end", iid=str(i), text=label, values=(
-                library.load_meta(f)["cliente"], "✔" if md.exists() else "",
+                meta["cliente"], "✔" if md.exists() else "",
                 "✔" if resumen.summary_path(md).exists() else ""))
-            if f == select or (target is None and select is None):
-                target = str(i)
+        total = len(self.files)
+        if words:
+            self.filter_count.config(text=f"{len(visible)} de {total} reuniones" if visible
+                                     else "Sin resultados para esa búsqueda")
+        else:
+            self.filter_count.config(text=f"{total} reuniones" if total else "Aún no hay reuniones")
+        target = next((str(i) for i in visible if self.files[i] == select), None) or (str(visible[0]) if visible else None)
         if target is not None:
             self.tree.selection_set(target)
             self.tree.see(target)

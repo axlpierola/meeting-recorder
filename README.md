@@ -60,7 +60,7 @@ Para actualizar: `git pull` y vuelve a abrir `iniciar.bat`.
 
 <p align="center"><img src="docs/img/app-grabar.png" alt="Pestaña Grabar" width="70%"></p>
 
-La ventana tiene **a la izquierda tus reuniones** (agrupadas por fecha, con cliente y marcas ✔ de transcripción y resumen)
+La ventana tiene **a la izquierda tus reuniones** (con buscador, agrupadas por fecha, con cliente y marcas ✔ de transcripción y resumen)
 y **a la derecha tres pestañas**. Abajo, siempre, el panel **Actividad** con el progreso y el registro de lo que hace la app.
 
 ### ● Grabar
@@ -101,6 +101,7 @@ edítalo para cambiar formato o tono. Marcadores disponibles: `{{IDIOMA}}`, `{{C
 También sirve para pegarlo tal cual en cualquier chat de IA.
 
 ### 🗂️ Gestionar reuniones
+- **Buscar:** el cuadro sobre la lista filtra mientras escribes por **nombre de la reunión y/o cliente** (varias palabras a la vez; ignora mayúsculas y tildes). `Ctrl+F` lo enfoca, `Esc` o ✕ lo limpia, y debajo ves cuántas reuniones coinciden.
 - **Editar datos** (botón, doble clic o clic derecho): cambia el **nombre** y completa **cliente** y **participantes**. Al renombrar se actualizan juntos audio, transcripción, resumen y datos; la fecha y hora originales se conservan.
 - **Borrar** (botón o tecla `Supr`): pide confirmación y envía todo a la **Papelera de reciclaje**, así que se puede recuperar.
 - **Importar video/audio…**, **Actualizar** y **Carpeta** (abre la carpeta de la reunión).
