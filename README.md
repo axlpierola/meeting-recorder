@@ -6,6 +6,19 @@ identificando quién habla. Pensado para reuniones de Slack, Meet, Zoom o Teams.
 
 Funciona en **macOS** (Apple Silicon o Intel) y **Linux** (Ubuntu con PipeWire/PulseAudio).
 
+> [!IMPORTANT]
+> **¿Usas Windows?** Esta rama (`main`) es para **macOS y Linux**. La versión para **Windows** es una aplicación
+> de escritorio con interfaz gráfica (grabar, transcribir y resumir con IA) y vive en la rama
+> [`windows`](https://github.com/axlpierola/meeting-recorder/tree/windows). Para usarla, **cambia de rama**:
+>
+> ```powershell
+> git clone -b windows https://github.com/axlpierola/meeting-recorder.git
+> # o, si ya clonaste el repositorio:
+> git checkout windows
+> ```
+>
+> Allí encontrarás su propio README con las instrucciones para Windows.
+
 ## Qué hace
 
 - Graba sistema + micrófono mezclados, con volumen normalizado, a un `.mp3`.
