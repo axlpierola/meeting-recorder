@@ -5,7 +5,7 @@
 > moderna, que **graba tus reuniones, las transcribe con IA y genera el resumen con action items**, todo desde una sola
 > ventana y sin instalar drivers de audio ni ser administrador.
 > Los scripts para macOS/Linux (`grabar.sh`, `install.sh`, `mp4towav.sh`) siguen en el repositorio, pero **no son el
-> foco de esta rama**.
+> foco de esta rama** (están en la rama `main`).
 
 <p align="center">
   <img src="docs/img/app-claro.png" alt="Interfaz en modo claro" width="49%">
@@ -40,7 +40,7 @@
 winget install Python.Python.3.12
 
 # 2) Descarga esta rama
-git clone -b claude/relaxed-goldberg-cuuba3 https://github.com/ccruzado/meeting-recorder.git E:\meeting-recording
+git clone -b windows https://github.com/axlpierola/meeting-recorder.git E:\meeting-recording
 
 # 3) Abre la aplicación
 E:\meeting-recording\iniciar.bat
