@@ -215,6 +215,18 @@ modelos de WhisperX se descargan la primera vez (varios GB para `large-v3`).
 - **Idioma del resumen:** selector en la pestaña Resumen (por defecto Español); el informe y sus títulos salen
   en ese idioma aunque la reunión esté en otro.
 
+### Gestionar reuniones: renombrar, borrar, cliente y participantes (Windows)
+
+- **Editar datos** (botón, doble clic o clic derecho en la lista): cambia el **nombre** de la reunión y completa los
+  campos opcionales **Cliente** y **Participantes**. Al renombrar se actualizan juntos el audio, la transcripción,
+  el resumen y los datos; la fecha y hora originales se conservan.
+- **Borrar** (botón, tecla Supr o clic derecho): envía todos los archivos de la reunión a la **Papelera de reciclaje**
+  (con confirmación), así que se pueden recuperar. Las carpetas de fecha que quedan vacías se limpian solas.
+- Cliente y participantes también se pueden escribir al empezar a grabar (pestaña Grabar). Se guardan en
+  `NOMBRE.meta.json` junto a la grabación.
+- Al generar el **resumen**, esos datos se incluyen en el prompt (ayudan a nombrar a los hablantes y dan contexto) y
+  aparecen al inicio del `.resumen.md`. Si no los completas, simplemente no se usan.
+
 ### Carpetas, resumen y proveedores (Windows)
 
 - Las grabaciones, transcripciones y resúmenes se guardan en `grabaciones/AAAA/MM/DD/`

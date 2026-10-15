@@ -37,6 +37,13 @@ PYTHON = str(_exe.with_name("python.exe")) if _exe.name.lower() == "pythonw.exe"
 # --------------------------------------------------------------------------
 # Utilidades
 # --------------------------------------------------------------------------
+def clean_name(name: str) -> str:
+    """Nombre apto para archivo: sin tildes (ñ→n), espacios→_, solo letras/números/_/-."""
+    import unicodedata
+    ascii_ = unicodedata.normalize("NFKD", name.strip()).encode("ascii", "ignore").decode()
+    return re.sub(r"[^A-Za-z0-9_-]", "", ascii_.replace(" ", "_"))
+
+
 def _has_module(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
@@ -526,7 +533,7 @@ class Recorder:
             raise RuntimeError("No hay ni audio del sistema ni micrófono para grabar")
         import pyaudiowpatch as pa  # type: ignore
 
-        clean = re.sub(r"[^A-Za-z0-9_-]", "", name.strip().replace(" ", "_"))
+        clean = clean_name(name)
         now = datetime.now()
         stamp = now.strftime("%Y-%m-%d_%H-%M-%S")
         base = recording_dir(now) / (f"{stamp}_{clean}" if clean else stamp)
@@ -652,7 +659,7 @@ def convert_to_wav(src: Path, log: Log = print) -> Path:
     ff = find_ffmpeg()
     if not ff:
         raise RuntimeError("ffmpeg no disponible")
-    base = re.sub(r"[^A-Za-z0-9_-]", "", src.stem.replace(" ", "_"))
+    base = clean_name(src.stem)
     now = datetime.now()
     out = recording_dir(now) / f"{now:%Y-%m-%d_%H-%M-%S}_{base}.wav"
     log(f"Convirtiendo {src.name} ...")

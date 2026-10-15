@@ -15,7 +15,7 @@ import tkinter as tk
 import ttkbootstrap as ttk
 from ttkbootstrap.tooltip import ToolTip
 
-from . import core, resumen, settings
+from . import core, library, resumen, settings
 
 THEMES = {"light": "flatly", "dark": "darkly"}
 SUMMARY_LANGS = ["Español", "English", "Português", "Français", "Deutsch", "Italiano"]
@@ -31,8 +31,8 @@ class App(ttk.Window):
         self.dark = self.cfg.get("theme", "light") == "dark"
         super().__init__(themename=THEMES["dark" if self.dark else "light"])
         self.title("Grabador + Transcriptor de reuniones")
-        self.geometry("1080x840")
-        self.minsize(960, 720)
+        self.geometry("1200x860")
+        self.minsize(1060, 740)
         self.q: queue.Queue = queue.Queue()
         self.rec: core.Recorder | None = None
         self.transcription: core.Transcription | None = None
@@ -64,7 +64,7 @@ class App(ttk.Window):
         c = self.cfg
         c.update({
             "theme": "dark" if self.dark else "light",
-            "rec_name": self.name_var.get(), "loop_dev": self.loop_var.get(), "mic_dev": self.mic_var.get(),
+            "loop_dev": self.loop_var.get(), "mic_dev": self.mic_var.get(),
             "model": self.model_var.get(), "lang": self.lang_var.get(), "device": self.dev_var.get(),
             "diarize": bool(self.diar_var.get()), "provider": self.prov_var.get(),
             "sum_lang": self.sum_lang_var.get(),
@@ -98,10 +98,10 @@ class App(ttk.Window):
         brow = ttk.Frame(env)
         brow.pack(fill="x", pady=(8, 0))
         ttk.Button(brow, text="↻ Verificar", bootstyle="primary-outline", command=self.refresh_env).pack(side="left")
-        self.btn_audio = ttk.Button(brow, text="Instalar audio/ffmpeg", bootstyle="info-outline",
+        self.btn_audio = ttk.Button(brow, text="Instalar audio/ffmpeg", bootstyle="primary-outline",
                                     command=lambda: self._install("audio"))
         self.btn_audio.pack(side="left", padx=6)
-        self.btn_wx = ttk.Button(brow, text="Instalar WhisperX", bootstyle="info-outline",
+        self.btn_wx = ttk.Button(brow, text="Instalar WhisperX", bootstyle="primary-outline",
                                  command=lambda: self._install("whisperx"))
         self.btn_wx.pack(side="left")
         ttk.Button(brow, text="Detalles", bootstyle="link", command=self.show_env_details).pack(side="left", padx=6)
@@ -129,30 +129,49 @@ class App(ttk.Window):
         sb.pack(side="right", fill="y")
         self.log_box.pack(side="left", fill="both", expand=True)
 
-        # Cuerpo: lista de grabaciones + pestañas
+        # Cuerpo: lista de reuniones + pestañas
         body = ttk.Frame(root)
         body.pack(fill="both", expand=True)
-        left = ttk.Labelframe(body, text=" Grabaciones ", padding=8)
-        left.pack(side="left", fill="y", padx=(0, 10))
-        self.tree = ttk.Treeview(left, columns=("t", "r"), height=14, selectmode="browse")
-        self.tree.heading("#0", text="Fecha / grabación", anchor="w")
-        self.tree.heading("t", text="Transc.")
+        left = ttk.Labelframe(body, text=" Reuniones ", padding=10)
+        left.pack(side="left", fill="y", padx=(0, 12))
+        wrap = ttk.Frame(left)
+        wrap.pack(fill="both", expand=True)
+        self.tree = ttk.Treeview(wrap, columns=("cli", "t", "r"), height=14, selectmode="browse")
+        self.tree.heading("#0", text="Reunión", anchor="w")
+        self.tree.heading("cli", text="Cliente", anchor="w")
+        self.tree.heading("t", text="Trans.")
         self.tree.heading("r", text="Resumen")
-        self.tree.column("#0", width=230, stretch=True)
-        self.tree.column("t", width=56, anchor="center", stretch=False)
-        self.tree.column("r", width=56, anchor="center", stretch=False)
-        tsb = ttk.Scrollbar(left, command=self.tree.yview)
+        self.tree.column("#0", width=190, stretch=True)
+        self.tree.column("cli", width=96, anchor="w", stretch=False)
+        self.tree.column("t", width=48, anchor="center", stretch=False)
+        self.tree.column("r", width=68, anchor="center", stretch=False)
+        tsb = ttk.Scrollbar(wrap, command=self.tree.yview)
         self.tree.config(yscrollcommand=tsb.set)
         tsb.pack(side="right", fill="y")
-        self.tree.pack(side="top", fill="both", expand=True)
-        ttk.Button(left, text="Importar video/audio…", bootstyle="secondary", command=self.import_file).pack(
-            side="bottom", fill="x", pady=(8, 0))
-        row = ttk.Frame(left)
-        row.pack(side="bottom", fill="x", pady=(8, 0))
-        ttk.Button(row, text="↻ Actualizar", bootstyle="primary-outline", command=self.refresh_files).pack(
-            side="left", expand=True, fill="x", padx=(0, 4))
-        ttk.Button(row, text="📂 Carpeta", bootstyle="primary-outline", command=self.open_selected_folder).pack(
-            side="left", expand=True, fill="x")
+        self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.bind("<<TreeviewSelect>>", lambda _e: self._update_meeting_info())
+        self.tree.bind("<Double-1>", lambda _e: self.edit_meeting())
+        self.tree.bind("<Delete>", lambda _e: self.delete_meeting())
+        self.tree.bind("<Button-3>", self._tree_menu)
+        self.menu = tk.Menu(self, tearoff=0)
+        self.menu.add_command(label="Editar datos…", command=self.edit_meeting)
+        self.menu.add_command(label="Abrir carpeta", command=self.open_selected_folder)
+        self.menu.add_separator()
+        self.menu.add_command(label="Borrar…", command=self.delete_meeting)
+
+        btns = ttk.Frame(left)
+        btns.pack(fill="x", pady=(10, 0))
+        btns.columnconfigure((0, 1), weight=1, uniform="lb")
+        for r, c, text, style, cmd in [
+            (0, 0, "✏  Editar datos", "primary-outline", self.edit_meeting),
+            (0, 1, "🗑  Borrar", "danger-outline", self.delete_meeting),
+            (1, 0, "↻  Actualizar", "primary-outline", self.refresh_files),
+            (1, 1, "📂  Carpeta", "primary-outline", self.open_selected_folder),
+        ]:
+            ttk.Button(btns, text=text, bootstyle=style, command=cmd).grid(
+                row=r, column=c, sticky="ew", padx=(0, 4) if c == 0 else (4, 0), pady=3)
+        ttk.Button(btns, text="⤓  Importar video/audio…", bootstyle="primary-outline", command=self.import_file).grid(
+            row=2, column=0, columnspan=2, sticky="ew", pady=3)
 
         self.nb = ttk.Notebook(body)
         self.nb.pack(side="left", fill="both", expand=True)
@@ -165,126 +184,139 @@ class App(ttk.Window):
             pass
         self.nb.bind("<<NotebookTabChanged>>", lambda _e: self._save_cfg())
 
-    def _row(self, parent, label: str, r: int):
-        ttk.Label(parent, text=label).grid(row=r, column=0, sticky="w", pady=6, padx=(0, 12))
+    # --- piezas comunes de las pestañas (mismo patrón en las tres)
+    def _tab(self, title: str, subtitle: str, label: str) -> ttk.Frame:
+        tab = ttk.Frame(self.nb, padding=24)
+        self.nb.add(tab, text=label)
+        tab.columnconfigure(0, minsize=170)
+        tab.columnconfigure(1, weight=1)
+        ttk.Label(tab, text=title, font=(FONT, 14, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(tab, text=subtitle, bootstyle="secondary", wraplength=640, justify="left").grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(2, 16))
+        return tab
+
+    def _field(self, tab, row: int, label: str, widget_factory=None, **grid):
+        lab = ttk.Label(tab, text=label)
+        lab.grid(row=row, column=0, sticky="nw", pady=7, padx=(0, 14))
+        if widget_factory:
+            w = widget_factory(tab)
+            w.grid(row=row, column=1, sticky="ew", pady=7, **grid)
+            return lab, w
+        return lab, None
+
+    def _actions(self, tab, row: int) -> ttk.Frame:
+        ttk.Separator(tab).grid(row=row, column=0, columnspan=3, sticky="ew", pady=(18, 16))
+        bar = ttk.Frame(tab)
+        bar.grid(row=row + 1, column=0, columnspan=3, sticky="w")
+        return bar
 
     def _build_record_tab(self) -> None:
-        tab = ttk.Frame(self.nb, padding=20)
-        self.nb.add(tab, text="  ●  Grabar  ")
-        tab.columnconfigure(1, weight=1)
-        self.name_var = self._var(tk.StringVar, "rec_name", "")
-        self._row(tab, "Nombre", 0)
-        ttk.Entry(tab, textvariable=self.name_var).grid(row=0, column=1, sticky="ew")
+        tab = self._tab("Grabar reunión", "Captura el audio de la salida activa (la reunión) y tu micrófono, y los "
+                        "mezcla en un MP3 dentro de grabaciones/AAAA/MM/DD.", "  ●  Grabar  ")
+        self.name_var, self.cli_var, self.part_var = tk.StringVar(), tk.StringVar(), tk.StringVar()
+        self._field(tab, 2, "Nombre", lambda p: ttk.Entry(p, textvariable=self.name_var))
+        self._field(tab, 3, "Cliente  (opcional)", lambda p: ttk.Entry(p, textvariable=self.cli_var))
+        self._field(tab, 4, "Participantes  (opcional)", lambda p: ttk.Entry(p, textvariable=self.part_var))
         self.loop_var = self._var(tk.StringVar, "loop_dev", "")
-        self._row(tab, "Audio del sistema", 1)
-        self.loop_cb = ttk.Combobox(tab, textvariable=self.loop_var, state="readonly")
-        self.loop_cb.grid(row=1, column=1, sticky="ew")
+        _, self.loop_cb = self._field(tab, 5, "Audio del sistema",
+                                      lambda p: ttk.Combobox(p, textvariable=self.loop_var, state="readonly"))
         self.mic_var = self._var(tk.StringVar, "mic_dev", "")
-        self._row(tab, "Micrófono", 2)
-        self.mic_cb = ttk.Combobox(tab, textvariable=self.mic_var, state="readonly")
-        self.mic_cb.grid(row=2, column=1, sticky="ew")
-        ttk.Separator(tab).grid(row=3, column=0, columnspan=2, sticky="ew", pady=22)
-        ctl = ttk.Frame(tab)
-        ctl.grid(row=4, column=0, columnspan=2, sticky="w")
-        self.btn_rec = ttk.Button(ctl, text="●  Grabar", bootstyle="danger", width=14, command=self.start_rec)
+        _, self.mic_cb = self._field(tab, 6, "Micrófono",
+                                     lambda p: ttk.Combobox(p, textvariable=self.mic_var, state="readonly"))
+        bar = self._actions(tab, 7)
+        self.btn_rec = ttk.Button(bar, text="●  Grabar", bootstyle="danger", width=16, command=self.start_rec)
         self.btn_rec.pack(side="left")
-        self.btn_stop = ttk.Button(ctl, text="■  Parar", bootstyle="secondary", width=12, command=self.stop_rec,
+        self.btn_stop = ttk.Button(bar, text="■  Parar", bootstyle="primary-outline", width=12, command=self.stop_rec,
                                    state="disabled")
         self.btn_stop.pack(side="left", padx=10)
-        self.timer = ttk.Label(ctl, text="00:00", font=(FONT, 30, "bold"))
-        self.timer.pack(side="left", padx=24)
-        self.rec_dot = ttk.Label(ctl, text="", bootstyle="danger", font=(FONT, 11, "bold"))
+        self.timer = ttk.Label(bar, text="00:00", font=(FONT, 26, "bold"))
+        self.timer.pack(side="left", padx=(22, 10))
+        self.rec_dot = ttk.Label(bar, text="", bootstyle="danger", font=(FONT, 11, "bold"))
         self.rec_dot.pack(side="left")
-        ttk.Label(tab, text="Se graba el audio de la salida activa (reunión) y tu micrófono, y se mezclan en un MP3 "
-                            "dentro de grabaciones/AAAA/MM/DD.", bootstyle="secondary", wraplength=560,
-                  justify="left").grid(row=5, column=0, columnspan=2, sticky="w", pady=(18, 0))
 
     def _build_transcribe_tab(self) -> None:
-        tab = ttk.Frame(self.nb, padding=20)
-        self.nb.add(tab, text="  📝  Transcribir  ")
-        tab.columnconfigure(1, weight=1)
+        tab = self._tab("Transcribir con WhisperX", "Convierte la reunión seleccionada (lista de la izquierda) en texto, "
+                        "con marcas de tiempo y, opcionalmente, quién habla.", "  📝  Transcribir  ")
         self.model_var = self._var(tk.StringVar, "model", "medium")
-        self._row(tab, "Modelo", 0)
-        ttk.Combobox(tab, textvariable=self.model_var, values=list(core.MODELS), state="readonly",
-                     width=16).grid(row=0, column=1, sticky="w")
+        self._field(tab, 2, "Modelo", lambda p: ttk.Combobox(p, textvariable=self.model_var, values=list(core.MODELS),
+                                                              state="readonly"))
         self.model_hint = ttk.Label(tab, text="", bootstyle="secondary")
-        self.model_hint.grid(row=0, column=2, sticky="w", padx=12)
+        self.model_hint.grid(row=3, column=1, sticky="w")
         self.model_var.trace_add("write", lambda *_: self.model_hint.config(text=core.MODELS.get(self.model_var.get(), "")))
         self.model_hint.config(text=core.MODELS.get(self.model_var.get(), ""))
         self.lang_var = self._var(tk.StringVar, "lang", os.environ.get("GRABAR_LANG", "es"))
-        self._row(tab, "Idioma del audio", 1)
-        ttk.Combobox(tab, textvariable=self.lang_var, values=TRANSCRIBE_LANGS, width=16).grid(row=1, column=1, sticky="w")
+        self._field(tab, 4, "Idioma del audio", lambda p: ttk.Combobox(p, textvariable=self.lang_var, values=TRANSCRIBE_LANGS))
         self.dev_var = self._var(tk.StringVar, "device", "auto")
-        self._row(tab, "Cómputo", 2)
-        ttk.Combobox(tab, textvariable=self.dev_var, values=["auto", "gpu", "cpu"], state="readonly",
-                     width=16).grid(row=2, column=1, sticky="w")
+        self._field(tab, 5, "Cómputo", lambda p: ttk.Combobox(p, textvariable=self.dev_var, values=["auto", "gpu", "cpu"],
+                                                               state="readonly"))
         self.diar_var = self._var(tk.BooleanVar, "diarize", False)
-        self._row(tab, "Identificar hablantes", 3)
-        ttk.Checkbutton(tab, variable=self.diar_var, bootstyle="round-toggle", text="(requiere token de Hugging Face)").grid(
-            row=3, column=1, columnspan=2, sticky="w")
-        self._row(tab, "Token HF", 4)
-        trow = ttk.Frame(tab)
-        trow.grid(row=4, column=1, columnspan=2, sticky="ew")
-        trow.columnconfigure(0, weight=1)
+        self._field(tab, 6, "Identificar hablantes", lambda p: ttk.Checkbutton(
+            p, variable=self.diar_var, bootstyle="round-toggle", text="requiere token de Hugging Face"))
         self.token_var = tk.StringVar(value=core.load_hf_token())
-        self.token_entry = ttk.Entry(trow, textvariable=self.token_var, show="•")
-        self.token_entry.grid(row=0, column=0, sticky="ew")
-        self.btn_token = ttk.Button(trow, width=9, bootstyle="secondary-outline", command=self.toggle_token)
-        self.btn_token.grid(row=0, column=1, padx=6)
-        ttk.Button(trow, text="¿Qué es?", bootstyle="link", command=self.explain_token).grid(row=0, column=2)
+
+        def token_row(p):
+            f = ttk.Frame(p)
+            f.columnconfigure(0, weight=1)
+            self.token_entry = ttk.Entry(f, textvariable=self.token_var, show="•")
+            self.token_entry.grid(row=0, column=0, sticky="ew")
+            self.btn_token = ttk.Button(f, width=9, bootstyle="primary-outline", command=self.toggle_token)
+            self.btn_token.grid(row=0, column=1, padx=(8, 0))
+            ttk.Button(f, text="¿Qué es?", bootstyle="link", command=self.explain_token).grid(row=0, column=2)
+            return f
+
+        self._field(tab, 7, "Token HF", token_row)
         self._token_locked(bool(self.token_var.get()))
-        ttk.Separator(tab).grid(row=5, column=0, columnspan=3, sticky="ew", pady=20)
-        ctl = ttk.Frame(tab)
-        ctl.grid(row=6, column=0, columnspan=3, sticky="w")
-        self.btn_tr = ttk.Button(ctl, text="Transcribir", bootstyle="primary", width=16, command=self.start_transcribe)
+        bar = self._actions(tab, 8)
+        self.btn_tr = ttk.Button(bar, text="Transcribir", bootstyle="primary", width=16, command=self.start_transcribe)
         self.btn_tr.pack(side="left")
-        self.btn_cancel = ttk.Button(ctl, text="Cancelar", bootstyle="danger-outline", command=self.cancel_transcribe,
-                                     state="disabled")
-        self.btn_cancel.pack(side="left", padx=8)
-        ttk.Button(ctl, text="Ver transcripción", bootstyle="secondary-outline", command=self.open_md).pack(side="left")
+        self.btn_cancel = ttk.Button(bar, text="Cancelar", bootstyle="danger-outline", width=12,
+                                     command=self.cancel_transcribe, state="disabled")
+        self.btn_cancel.pack(side="left", padx=10)
+        ttk.Button(bar, text="Ver transcripción", bootstyle="primary-outline", command=self.open_md).pack(side="left")
 
     def _build_summary_tab(self) -> None:
-        tab = ttk.Frame(self.nb, padding=20)
-        self.nb.add(tab, text="  ✨  Resumen  ")
-        tab.columnconfigure(1, weight=1)
+        tab = self._tab("Resumen con IA", "Genera resumen, key discussion points, decisiones y action items de la reunión "
+                        "seleccionada, usando el cliente y los participantes que hayas indicado.", "  ✨  Resumen  ")
         prov = self.cfg.get("provider", next(iter(resumen.PROVIDERS)))
         if prov not in resumen.PROVIDERS:
             prov = next(iter(resumen.PROVIDERS))
         self.prov_var = tk.StringVar(value=prov)
-        self._row(tab, "Proveedor", 0)
-        pc = ttk.Combobox(tab, textvariable=self.prov_var, values=list(resumen.PROVIDERS), state="readonly", width=26)
-        pc.grid(row=0, column=1, sticky="w")
+        _, pc = self._field(tab, 2, "Proveedor", lambda p: ttk.Combobox(p, textvariable=self.prov_var,
+                                                                        values=list(resumen.PROVIDERS), state="readonly"))
         pc.bind("<<ComboboxSelected>>", lambda _e: self._provider_changed())
         self.sum_model_var = tk.StringVar()
         self.sum_model_var.trace_add("write", lambda *_: self._save_cfg())
-        self._row(tab, "Modelo", 1)
-        self.sum_model_cb = ttk.Combobox(tab, textvariable=self.sum_model_var, width=26)
-        self.sum_model_cb.grid(row=1, column=1, sticky="w")
+        _, self.sum_model_cb = self._field(tab, 3, "Modelo", lambda p: ttk.Combobox(p, textvariable=self.sum_model_var))
         self.sum_lang_var = self._var(tk.StringVar, "sum_lang", "Español")
-        self._row(tab, "Idioma del resumen", 2)
-        ttk.Combobox(tab, textvariable=self.sum_lang_var, values=SUMMARY_LANGS, state="readonly",
-                     width=26).grid(row=2, column=1, sticky="w")
-        self.key_label = ttk.Label(tab, text="API key")
-        self.key_label.grid(row=3, column=0, sticky="w", pady=6, padx=(0, 12))
-        krow = self.key_row = ttk.Frame(tab)
-        krow.grid(row=3, column=1, sticky="ew")
-        krow.columnconfigure(0, weight=1)
+        self._field(tab, 4, "Idioma del resumen", lambda p: ttk.Combobox(p, textvariable=self.sum_lang_var,
+                                                                          values=SUMMARY_LANGS, state="readonly"))
         self.key_var = tk.StringVar()
-        self.key_entry = ttk.Entry(krow, textvariable=self.key_var, show="•")
-        self.key_entry.grid(row=0, column=0, sticky="ew")
-        self.btn_key = ttk.Button(krow, width=9, bootstyle="secondary-outline", command=self.toggle_key)
-        self.btn_key.grid(row=0, column=1, padx=6)
-        self.btn_getkey = ttk.Button(krow, text="Obtener key", bootstyle="link", command=self.open_key_page)
-        self.btn_getkey.grid(row=0, column=2)
-        self.sum_hint = ttk.Label(tab, text="", bootstyle="secondary", wraplength=560, justify="left")
-        self.sum_hint.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
-        ttk.Separator(tab).grid(row=5, column=0, columnspan=2, sticky="ew", pady=20)
-        ctl = ttk.Frame(tab)
-        ctl.grid(row=6, column=0, columnspan=2, sticky="w")
-        self.btn_sum = ttk.Button(ctl, text="Generar resumen", bootstyle="primary", width=18, command=self.start_summary)
+
+        def key_row(p):
+            f = self.key_row = ttk.Frame(p)
+            f.columnconfigure(0, weight=1)
+            self.key_entry = ttk.Entry(f, textvariable=self.key_var, show="•")
+            self.key_entry.grid(row=0, column=0, sticky="ew")
+            self.btn_key = ttk.Button(f, width=9, bootstyle="primary-outline", command=self.toggle_key)
+            self.btn_key.grid(row=0, column=1, padx=(8, 0))
+            ttk.Button(f, text="Obtener key", bootstyle="link", command=self.open_key_page).grid(row=0, column=2)
+            return f
+
+        self.key_label, _ = self._field(tab, 5, "API key", key_row)
+        self.sum_hint = ttk.Label(tab, text="", bootstyle="secondary", wraplength=470, justify="left")
+        self.sum_hint.grid(row=6, column=1, sticky="w")
+        self._field(tab, 7, "Reunión seleccionada", None)
+        info = ttk.Frame(tab)
+        info.grid(row=7, column=1, columnspan=2, sticky="ew", pady=7)
+        info.columnconfigure(0, weight=1)
+        self.meeting_info = ttk.Label(info, text="—", justify="left", wraplength=470)
+        self.meeting_info.grid(row=0, column=0, sticky="w")
+        ttk.Button(info, text="Editar datos", bootstyle="link", command=self.edit_meeting).grid(row=0, column=1, sticky="e")
+        bar = self._actions(tab, 8)
+        self.btn_sum = ttk.Button(bar, text="Generar resumen", bootstyle="primary", width=18, command=self.start_summary)
         self.btn_sum.pack(side="left")
-        ttk.Button(ctl, text="Ver resumen", bootstyle="secondary-outline", command=self.open_summary).pack(side="left", padx=8)
-        self.btn_ollama = ttk.Button(ctl, text="Instalar Ollama + modelo", bootstyle="info-outline",
+        ttk.Button(bar, text="Ver resumen", bootstyle="primary-outline", command=self.open_summary).pack(side="left", padx=10)
+        self.btn_ollama = ttk.Button(bar, text="Instalar Ollama + modelo", bootstyle="primary-outline",
                                      command=lambda: self.start_summary(setup_only=True))
         self._provider_changed(initial=True)
 
@@ -510,6 +542,7 @@ class App(ttk.Window):
         try:
             self.rec = core.Recorder(loop, mic)
             out = self.rec.start(self.name_var.get())
+            library.save_meta(out, self.cli_var.get(), self.part_var.get())
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("Grabar", str(e))
             return
@@ -519,11 +552,13 @@ class App(ttk.Window):
 
     def stop_rec(self) -> None:
         rec = self.rec
-        self.btn_stop.config(state="disabled", bootstyle="secondary")
+        self.btn_stop.config(state="disabled", bootstyle="primary-outline")
 
         def done(out, err):
             self.btn_rec.config(state="normal")
             self.timer.config(text="00:00")
+            for v in (self.name_var, self.cli_var, self.part_var):
+                v.set("")
             if out:
                 self.log(f"✔ Guardado: {out}")
                 self.refresh_files(select=out)
@@ -544,21 +579,126 @@ class App(ttk.Window):
                 rel = "(otras)"
             parent = f"d:{rel}"
             if not self.tree.exists(parent):
-                self.tree.insert("", "end", iid=parent, text=f"📅 {rel.replace('/', '-') or 'raíz'}", open=True)
+                self.tree.insert("", "end", iid=parent, text=f"📅  {rel.replace('/', '-') or 'raíz'}", open=True)
             m = self._NAME_RE.match(f.stem)
-            label = f"{m[1]}:{m[2]}  {m[3] or f.suffix[1:]}" if m else f.name
+            name = library.display_name(f) or f.suffix[1:]
+            label = f"{m[1]}:{m[2]}   {name}" if m else f.name
             md = f.with_suffix(".md")
-            self.tree.insert(parent, "end", iid=str(i), text=label,
-                             values=("✔" if md.exists() else "", "✔" if resumen.summary_path(md).exists() else ""))
+            self.tree.insert(parent, "end", iid=str(i), text=label, values=(
+                library.load_meta(f)["cliente"], "✔" if md.exists() else "",
+                "✔" if resumen.summary_path(md).exists() else ""))
             if f == select or (target is None and select is None):
                 target = str(i)
         if target is not None:
             self.tree.selection_set(target)
             self.tree.see(target)
+        self._update_meeting_info()
 
     def _selected(self) -> Path | None:
         sel = self.tree.selection()
         return self.files[int(sel[0])] if sel and sel[0].isdigit() else None
+
+    def _tree_menu(self, event) -> None:
+        row = self.tree.identify_row(event.y)
+        if row and row.isdigit():
+            self.tree.selection_set(row)
+            self.menu.tk_popup(event.x_root, event.y_root)
+
+    def _update_meeting_info(self) -> None:
+        if not hasattr(self, "meeting_info"):
+            return
+        f = self._selected()
+        if not f:
+            self.meeting_info.config(text="— (elige una reunión de la lista)")
+            return
+        meta = library.load_meta(f)
+        self.meeting_info.config(text=(
+            f"{library.display_name(f) or f.stem}\n"
+            f"Cliente: {meta['cliente'] or '—'}   ·   Participantes: {meta['participantes'] or '—'}"))
+
+    def _can_change_meeting(self) -> Path | None:
+        f = self._selected()
+        if not f:
+            messagebox.showinfo("Reunión", "Elige una reunión de la lista de la izquierda.")
+            return None
+        if self.busy or (self.rec and self.rec.active):
+            messagebox.showinfo("Reunión", "Espera a que termine la grabación o la tarea en curso (panel Actividad).")
+            return None
+        return f
+
+    def edit_meeting(self) -> None:
+        f = self._can_change_meeting()
+        if not f:
+            return
+        meta = library.load_meta(f)
+        dlg = ttk.Toplevel(self)
+        dlg.title("Editar datos de la reunión")
+        dlg.transient(self)
+        dlg.resizable(False, False)
+        body = ttk.Frame(dlg, padding=24)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+        ttk.Label(body, text="Datos de la reunión", font=(FONT, 14, "bold")).grid(row=0, column=0, columnspan=2, sticky="w")
+        stamp, _ = library.split_stem(f.stem)
+        when = f"{stamp.split('_')[0]} {stamp.split('_')[1].replace('-', ':')}" if stamp else f.name
+        ttk.Label(body, text=f"Grabada: {when}",
+                  bootstyle="secondary").grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 14))
+        vars_ = {"name": tk.StringVar(value=library.display_name(f)), "cli": tk.StringVar(value=meta["cliente"]),
+                 "part": tk.StringVar(value=meta["participantes"])}
+        for r, (label, key) in enumerate([("Nombre", "name"), ("Cliente  (opcional)", "cli"),
+                                          ("Participantes  (opcional)", "part")], start=2):
+            ttk.Label(body, text=label).grid(row=r, column=0, sticky="w", pady=7, padx=(0, 14))
+            e = ttk.Entry(body, textvariable=vars_[key], width=44)
+            e.grid(row=r, column=1, sticky="ew", pady=7)
+            if key == "name":
+                e.focus_set()
+        ttk.Label(body, text="El cliente y los participantes se incluyen al generar el resumen.",
+                  bootstyle="secondary").grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        bar = ttk.Frame(body)
+        bar.grid(row=6, column=0, columnspan=2, sticky="e", pady=(18, 0))
+
+        def save() -> None:
+            try:
+                new = library.rename_recording(f, vars_["name"].get())
+                library.save_meta(new, vars_["cli"].get(), vars_["part"].get())
+            except (library.LibraryError, OSError) as e:
+                messagebox.showerror("Editar reunión", str(e), parent=dlg)
+                return
+            dlg.destroy()
+            self.log(f"✔ Reunión actualizada: {new.name}")
+            self.refresh_files(select=new)
+
+        ttk.Button(bar, text="Cancelar", bootstyle="primary-outline", width=12, command=dlg.destroy).pack(side="right")
+        ttk.Button(bar, text="Guardar", bootstyle="primary", width=12, command=save).pack(side="right", padx=(0, 10))
+        dlg.bind("<Return>", lambda _e: save())
+        dlg.bind("<Escape>", lambda _e: dlg.destroy())
+        dlg.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dlg.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dlg.winfo_height()) // 3
+        dlg.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        dlg.grab_set()
+
+    def delete_meeting(self) -> None:
+        f = self._can_change_meeting()
+        if not f:
+            return
+        n = len(library.companions(f))
+        if not messagebox.askyesno(
+                "Borrar reunión",
+                f"¿Borrar la reunión «{library.display_name(f) or f.name}»?\n\n"
+                f"Se enviarán a la Papelera de reciclaje {n} archivo(s): audio, transcripción, resumen y datos.\n"
+                "Podrás recuperarlos desde la Papelera.", icon="warning", default="no"):
+            return
+
+        def done(res, err):
+            if res:
+                count, recycled = res
+                library.prune_empty_dirs()
+                self.log(f"✔ Reunión borrada ({count} archivos" + (", enviados a la Papelera)" if recycled else ", eliminados)")
+                         )
+            self.refresh_files()
+
+        self._bg(lambda: library.delete_recording(f), done)
 
     def open_selected_folder(self) -> None:
         f = self._selected()
@@ -718,6 +858,7 @@ class App(ttk.Window):
                     "Preparar Ollama", "Primero hay que " + " y ".join(todo) + ", solo la primera vez y sin que "
                     "hagas nada manual (puede tardar según tu internet).\n\n¿Continuar?"):
                 return
+        meta = library.load_meta(f) if f else None
         if not self.act_begin("Preparando ..."):
             return
         self.btn_sum.config(state="disabled")
@@ -736,7 +877,7 @@ class App(ttk.Window):
                 if setup_only:
                     return None
             self.ui(lambda: (self.act_text(f"Generando resumen con {self.prov_var.get()} ..."), self.act_indeterminate()))
-            return resumen.summarize(md, pid, model, key, self.log, lang)
+            return resumen.summarize(md, pid, model, key, self.log, lang, meta)
 
         def done(out, err):
             self.act_end("Resumen listo." if out else "Listo." if setup_only and not err else "No se generó el resumen.")

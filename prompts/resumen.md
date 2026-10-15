@@ -8,8 +8,14 @@ SPEAKER_01, etc.). Genera un informe claro y accionable.
 - Usa SOLO información presente en la transcripción. No inventes nombres, fechas, cifras ni compromisos.
   Si algo no está claro, escribe "No especificado".
 - Corrige mentalmente errores evidentes de transcripción (nombres propios, siglas) solo si el contexto lo deja claro.
-- Si los hablantes se presentan o se nombran entre sí, usa esos nombres; si no, usa SPEAKER_XX.
+- Si los hablantes se presentan o se nombran entre sí, usa esos nombres; si no, usa SPEAKER_XX. Los participantes
+  indicados abajo sirven para nombrar a las personas cuando el contexto lo permita; no asignes un nombre a un
+  SPEAKER_XX sin evidencia en la conversación.
 - Sé conciso: prioriza lo importante sobre el detalle anecdótico. Ignora saludos y charla irrelevante.
+
+## Datos de la reunión (informados por el usuario)
+- Cliente: {{CLIENTE}}
+- Participantes: {{PARTICIPANTES}}
 
 ## Formato de salida (Markdown, exactamente estas secciones)
 

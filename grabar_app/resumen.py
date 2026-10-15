@@ -275,13 +275,17 @@ def _ask_openai(model: str, key: str, prompt: str) -> str:
 # --------------------------------------------------------------------------
 # Resumen
 # --------------------------------------------------------------------------
-def build_prompt(transcript_md: Path, language: str = "Español") -> str:
+def build_prompt(transcript_md: Path, language: str = "Español", meta: Optional[dict] = None) -> str:
     if not PROMPT_FILE.exists():
         raise SummaryError(f"Falta el archivo del prompt: {PROMPT_FILE}")
     text = transcript_md.read_text(encoding="utf-8")
     text = text.replace("# Transcripción de Audio", "").strip()
     prompt = PROMPT_FILE.read_text(encoding="utf-8")
-    return prompt.replace("{{IDIOMA}}", language).replace("{{TRANSCRIPCION}}", text)
+    meta = meta or {}
+    return (prompt.replace("{{IDIOMA}}", language)
+            .replace("{{CLIENTE}}", meta.get("cliente") or "No especificado")
+            .replace("{{PARTICIPANTES}}", meta.get("participantes") or "No especificados")
+            .replace("{{TRANSCRIPCION}}", text))
 
 
 def summary_path(transcript_md: Path) -> Path:
@@ -289,13 +293,13 @@ def summary_path(transcript_md: Path) -> Path:
 
 
 def summarize(transcript_md: Path, provider_id: str, model: str, key: str, log: Log = print,
-              language: str = "Español") -> Path:
+              language: str = "Español", meta: Optional[dict] = None) -> Path:
     model = model.strip()
     if not model:
         raise SummaryError("Indicá el modelo a usar.")
     if provider_id != "ollama" and not key:
         raise SummaryError("Falta la API key de este proveedor (campo 'API key').")
-    prompt = build_prompt(transcript_md, language)
+    prompt = build_prompt(transcript_md, language, meta)
     log(f"Generando resumen en {language} con {provider_id}/{model} ...")
     if provider_id == "ollama":
         text = _ask_ollama(model, prompt)
@@ -313,5 +317,11 @@ def summarize(transcript_md: Path, provider_id: str, model: str, key: str, log: 
     out = summary_path(transcript_md)
     header = (f"# Resumen de reunión\n\n_Fuente: {transcript_md.name} · Generado con {provider_id}/{model} "
               f"el {datetime.now():%Y-%m-%d %H:%M}_\n\n")
-    out.write_text(header + text + "\n", encoding="utf-8")
+    meta = meta or {}
+    data = ""
+    if meta.get("cliente"):
+        data += f"**Cliente:** {meta['cliente']}  \n"
+    if meta.get("participantes"):
+        data += f"**Participantes:** {meta['participantes']}  \n"
+    out.write_text(header + (data + "\n" if data else "") + text + "\n", encoding="utf-8")
     return out
