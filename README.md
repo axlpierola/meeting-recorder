@@ -216,3 +216,8 @@ mp4towav ~/Downloads/reunion.mp4   # convierte un video/audio ya grabado para tr
   de salida múltiple una sola vez; `install.sh` te muestra los pasos).
 - **Linux** usa el `.monitor` de PulseAudio/PipeWire, sin configuración extra.
 - La transcripción con WhisperX y el token de Hugging Face funcionan igual que en la versión Windows (ver arriba).
+
+## Licencia
+
+Publicado bajo la licencia [MIT](LICENSE). Podés usarlo, modificarlo y distribuirlo libremente, incluso con
+fines comerciales, manteniendo el aviso de copyright. Se ofrece sin garantías.
